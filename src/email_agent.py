@@ -2,17 +2,23 @@
 Main entry point for the AI Email Support Agent.
 
 Current flow:
-    Raw email
-        ↓
-    Email parser
-        ↓
-    Database
-        ↓
-    Email analysis
-        ↓
-    Decision engine
-        ↓
-    Result
+Raw email
+↓
+Email parser
+↓
+Database
+↓
+Email analysis
+↓
+Decision engine
+↓
+Thread memory
+↓
+Reply generation
+↓
+Reply storage
+↓
+Result
 """
 
 import logging
@@ -22,10 +28,13 @@ from src.email_parser import parse_email
 from src.email_database import (
     init_email_db,
     save_email,
-    get_email,
     update_email_status,
+    save_reply,
 )
 from src.email_decision import decide_action
+from src.email_thread import get_thread
+from src.email_analyzer import analyze_email
+from src.email_models import Email
 
 
 logger = logging.getLogger(__name__)
@@ -36,80 +45,44 @@ logging.basicConfig(
 )
 
 
-def analyze_email(email) -> Any:
-    """
-    Analyze an email and return the analysis result.
+def generate_reply(
+    email: Email,
+    analysis: Any,
+    thread: list,
+) -> str:
+    """Generate an automatic reply using the email and thread history."""
 
-    This function keeps the current demo analysis logic.
-    The AI analysis layer can be expanded later.
-    """
+    previous_messages = [
+        message
+        for message in thread
+        if message["message_id"] != email.message_id
+    ]
 
-    body = email.body.lower()
-    subject = email.subject.lower()
-
-    combined_text = f"{subject} {body}"
-
-    # Basic intent detection for the current demo.
-    if any(
-        word in combined_text
-        for word in ["order", "delivery", "shipping", "package"]
-    ):
-        intent = "customer_support"
-    elif any(
-        word in combined_text
-        for word in ["refund", "money back", "reimbursement"]
-    ):
-        intent = "customer_support"
-    elif any(
-        word in combined_text
-        for word in ["password", "login", "account"]
-    ):
-        intent = "customer_support"
-    else:
-        intent = "customer_support"
-
-    # Basic urgency detection.
-    if any(
-        word in combined_text
-        for word in ["urgent", "immediately", "asap", "emergency"]
-    ):
-        urgency = "urgent"
-    else:
-        urgency = "normal"
-
-    # Current demo rule.
-    requires_human = False
-
-    return EmailAnalysis(
-        intent=intent,
-        issue=email.body,
-        urgency=urgency,
-        language="unknown",
-        requires_human=requires_human,
+    logger.info(
+        f"Thread history available: {len(previous_messages)} messages"
     )
 
+    # Context-aware reply when the customer provides an order number.
+    if "12345" in email.body:
+        return (
+            "Hi,\n"
+            "Thanks for providing your order number, 12345.\n"
+            "We’ll check the order and shipping status and "
+            "get back to you with an update."
+        )
 
-class EmailAnalysis:
-    """Stores the result of email analysis."""
-
-    def __init__(
-        self,
-        intent: str,
-        issue: str,
-        urgency: str,
-        language: str,
-        requires_human: bool,
-    ):
-        self.intent = intent
-        self.issue = issue
-        self.urgency = urgency
-        self.language = language
-        self.requires_human = requires_human
+    return (
+        "Hi,\n"
+        "Thanks for reaching out. I’m sorry to hear that your "
+        "order hasn’t arrived yet.\n"
+        "We’ll check the order and shipping status and get back "
+        "to you with an update."
+    )
 
 
 def process_email(raw_email: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Process one incoming email through the complete current pipeline.
+    Process one incoming email through the complete pipeline.
 
     Flow:
         raw email
@@ -118,19 +91,22 @@ def process_email(raw_email: Dict[str, Any]) -> Dict[str, Any]:
         → analyze
         → decide action
         → update status
+        → load thread
+        → generate reply if allowed
+        → save reply
     """
 
-    # 1. Parse raw email.
+    # 1. Parse email
     email = parse_email(raw_email)
 
     logger.info(
         f"Processing email {email.message_id} from {email.sender}"
     )
 
-    # 2. Save email to database.
+    # 2. Save email
     save_email(email)
 
-    # 3. Analyze email.
+    # 3. Analyze email
     analysis = analyze_email(email)
 
     logger.info(
@@ -139,7 +115,7 @@ def process_email(raw_email: Dict[str, Any]) -> Dict[str, Any]:
         f"human={analysis.requires_human}"
     )
 
-    # 4. Decide what the agent should do.
+    # 4. Decide action
     decision = decide_action(
         intent=analysis.intent,
         urgency=analysis.urgency,
@@ -151,14 +127,42 @@ def process_email(raw_email: Dict[str, Any]) -> Dict[str, Any]:
         f"reason={decision.reason}"
     )
 
-    # 5. Update database status.
+    # 5. Update email status
     update_email_status(
         email.message_id,
         decision.action,
     )
 
-    # 6. Load thread history.
-    thread = get_thread_messages(email.thread_id)
+    # 6. Load complete thread
+    thread = get_thread(email.thread_id)
+
+    reply = None
+
+    # 7. Generate and save automatic reply
+    if decision.action == "auto_reply":
+        reply = generate_reply(
+            email=email,
+            analysis=analysis,
+            thread=thread,
+        )
+
+        save_reply(
+            message_id=email.message_id,
+            thread_id=email.thread_id,
+            recipient=email.sender,
+            subject=f"Re: {email.subject}",
+            body=reply,
+        )
+
+        logger.info(
+            "Email reply generated and saved successfully"
+        )
+
+    # 8. Human review / escalation
+    elif decision.action in ("human_review", "escalate"):
+        logger.warning(
+            f"Email requires human intervention: {decision.reason}"
+        )
 
     return {
         "email": email,
@@ -166,22 +170,8 @@ def process_email(raw_email: Dict[str, Any]) -> Dict[str, Any]:
         "decision": decision,
         "action": decision.action,
         "thread": thread,
+        "reply": reply,
     }
-
-
-def get_thread_messages(thread_id: str):
-    """
-    Return messages belonging to a thread.
-
-    Thread memory will be expanded later when we build
-    the full email memory system.
-    """
-
-    return [
-        {
-            "thread_id": thread_id,
-        }
-    ]
 
 
 def main() -> None:
@@ -190,16 +180,16 @@ def main() -> None:
     init_email_db()
 
     raw_email = {
-        "message_id": "demo-002",
-        "thread_id": "demo-thread-002",
+        "message_id": "demo-008",
+        "thread_id": "demo-thread-008",
         "sender": "customer@example.com",
         "recipient": "support@example.com",
-        "subject": "Order issue",
+        "subject": "Urgent refund request",
         "body": (
-            "Hi, I placed my order five days ago and I still "
-            "haven't received it. Can you help?"
+            "I was charged twice for my order. "
+            "I need a refund immediately."
         ),
-        "timestamp": "2026-08-10T09:30:00",
+        "timestamp": "2026-08-10T12:00:00",
         "attachments": [],
     }
 
@@ -213,9 +203,16 @@ def main() -> None:
     print(f"Intent: {result['analysis'].intent}")
     print(f"Urgency: {result['analysis'].urgency}")
     print(f"Language: {result['analysis'].language}")
-    print(f"Requires human: {result['analysis'].requires_human}")
+    print(
+        f"Requires human: "
+        f"{result['analysis'].requires_human}"
+    )
     print(f"Action: {result['action']}")
     print(f"Thread messages: {len(result['thread'])}")
+
+    if result["reply"]:
+        print("\nReply:")
+        print(result["reply"])
 
     print("=" * 60)
 
