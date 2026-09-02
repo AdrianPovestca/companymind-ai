@@ -87,19 +87,49 @@ def detect_intent(subject: str, body: str) -> str:
 
     text = f"{subject} {body}".lower()
 
-    if any(word in text for word in ("refund", "money back", "return")):
+    if any(
+        word in text
+        for word in ("refund", "money back", "return")
+    ):
         return "refund"
 
-    if any(word in text for word in ("payment", "charged", "billing", "invoice")):
+    if any(
+        word in text
+        for word in ("payment", "charged", "billing", "invoice")
+    ):
         return "billing"
 
-    if any(word in text for word in ("order", "delivery", "shipping", "package")):
+    if any(
+        word in text
+        for word in (
+            "order",
+            "delivery",
+            "shipping",
+            "package",
+        )
+    ):
         return "customer_support"
 
-    if any(word in text for word in ("complaint", "unhappy", "terrible", "disappointed")):
+    if any(
+        word in text
+        for word in (
+            "complaint",
+            "unhappy",
+            "terrible",
+            "disappointed",
+        )
+    ):
         return "complaint"
 
-    if any(word in text for word in ("price", "pricing", "buy", "purchase")):
+    if any(
+        word in text
+        for word in (
+            "price",
+            "pricing",
+            "buy",
+            "purchase",
+        )
+    ):
         return "sales"
 
     return "general"
@@ -110,23 +140,41 @@ def analyze_email(email: Email) -> EmailAnalysis:
 
     text = f"{email.subject} {email.body}".lower()
 
-    intent = detect_intent(email.subject, email.body)
+    intent = detect_intent(
+        email.subject,
+        email.body,
+    )
+
     language = detect_language(email.body)
 
-    is_urgent = any(word in text for word in URGENT_WORDS)
-    requires_human = any(word in text for word in HUMAN_REQUIRED_WORDS)
+    is_urgent = any(
+        word in text
+        for word in URGENT_WORDS
+    )
+
+    requires_human = any(
+        word in text
+        for word in HUMAN_REQUIRED_WORDS
+    )
 
     if requires_human:
         urgency = "high"
-        reason = "The email contains an issue that should be reviewed by a human."
+        reason = (
+            "The email contains an issue that should "
+            "be reviewed by a human."
+        )
 
     elif is_urgent:
         urgency = "high"
-        reason = "The customer explicitly indicates urgency."
+        reason = (
+            "The customer explicitly indicates urgency."
+        )
 
     else:
         urgency = "normal"
-        reason = "The email can initially be handled automatically."
+        reason = (
+            "The email can initially be handled automatically."
+        )
 
     return EmailAnalysis(
         intent=intent,

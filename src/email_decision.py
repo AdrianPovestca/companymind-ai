@@ -29,18 +29,19 @@ def decide_action(
     - ignore
     """
 
-    # Urgent emails should always be reviewed by a human.
-    if urgency == "urgent":
-        return EmailDecision(
-            action="escalate",
-            reason="Email is marked as urgent.",
-        )
-
-    # The AI analyzer can explicitly require human intervention.
+    # Explicit human intervention takes priority.
     if requires_human:
         return EmailDecision(
             action="human_review",
             reason="Email analysis requires human intervention.",
+        )
+
+    # Urgent emails without a specific human-review requirement
+    # should be escalated.
+    if urgency in ("urgent", "high"):
+        return EmailDecision(
+            action="escalate",
+            reason="Email requires urgent human attention.",
         )
 
     # Spam and irrelevant messages do not need a reply.
@@ -54,7 +55,9 @@ def decide_action(
     if intent == "customer_support":
         return EmailDecision(
             action="auto_reply",
-            reason="Normal customer support request can be handled automatically.",
+            reason=(
+                "Normal customer support request can be handled automatically."
+            ),
         )
 
     # Unknown cases should never be answered automatically.
@@ -62,3 +65,4 @@ def decide_action(
         action="human_review",
         reason="Email intent is not recognized.",
     )
+    

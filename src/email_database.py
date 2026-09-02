@@ -1,7 +1,7 @@
 """
 Email database layer.
 
-Stores parsed emails, replies, decision metadata,
+Stores incoming emails, outgoing replies, decision metadata,
 and human review information in SQLite.
 """
 
@@ -17,14 +17,14 @@ DB_PATH = BASE_DIR / "emails.db"
 
 
 def get_connection() -> sqlite3.Connection:
-    """Create a database connection."""
+    """Create a SQLite database connection."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_email_db() -> None:
-    """Create all required email tables and columns."""
+    """Create the email database schema if it does not exist."""
     conn = get_connection()
 
     conn.execute(
@@ -67,8 +67,17 @@ def init_email_db() -> None:
         """
     )
 
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_email_message_type
+        ON emails(message_type)
+        """
+    )
+
     conn.commit()
     conn.close()
+
+    _ensure_schema()
 
 
 def _ensure_column(
@@ -76,7 +85,7 @@ def _ensure_column(
     column_name: str,
     column_definition: str,
 ) -> None:
-    """Add a column if it does not already exist."""
+    """Add a database column if it does not already exist."""
     columns = conn.execute(
         "PRAGMA table_info(emails)"
     ).fetchall()
@@ -95,8 +104,8 @@ def _ensure_column(
 
 def _ensure_schema() -> None:
     """
-    Make sure older emails.db files receive
-    all new columns introduced by the agent.
+    Upgrade an existing emails.db database with any columns
+    required by the current email agent.
     """
     conn = get_connection()
 
@@ -119,6 +128,27 @@ def _ensure_schema() -> None:
             column_definition,
         )
 
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_email_thread_id
+        ON emails(thread_id)
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_email_status
+        ON emails(status)
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_email_message_type
+        ON emails(message_type)
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -127,11 +157,29 @@ def save_email(
     email: Email,
     status: str = "new",
 ) -> None:
-    """Save an email. Existing message IDs are ignored."""
+    """
+    Save an incoming email.
+
+    Existing message IDs are ignored so the same email
+    cannot accidentally be inserted twice.
+    """
     init_email_db()
-    _ensure_schema()
 
     conn = get_connection()
+
+    timestamp = email.timestamp
+
+    if timestamp is None:
+        timestamp_value = ""
+    elif hasattr(timestamp, "isoformat"):
+        timestamp_value = timestamp.isoformat()
+    else:
+        timestamp_value = str(timestamp)
+
+    attachments = ",".join(
+        str(item)
+        for item in email.attachments
+    )
 
     conn.execute(
         """
@@ -156,8 +204,8 @@ def save_email(
             email.recipient,
             email.subject,
             email.body,
-            email.timestamp,
-            ",".join(email.attachments),
+            timestamp_value,
+            attachments,
             status,
             "email",
         ),
@@ -172,7 +220,6 @@ def get_email(
 ) -> Optional[dict]:
     """Return an email by message ID."""
     init_email_db()
-    _ensure_schema()
 
     conn = get_connection()
 
@@ -197,7 +244,9 @@ def update_email_status(
     message_id: str,
     status: str,
 ) -> None:
-    """Update processing status for an email."""
+    """Update the processing status of an email."""
+    init_email_db()
+
     conn = get_connection()
 
     conn.execute(
@@ -225,13 +274,12 @@ def save_decision_metadata(
     requires_human: bool,
 ) -> None:
     """
-    Save the decision made by the agent.
+    Save the agent decision and analysis metadata.
 
-    If human intervention is required,
-    create a pending human review automatically.
+    Emails requiring human intervention automatically receive
+    a pending human review status.
     """
     init_email_db()
-    _ensure_schema()
 
     conn = get_connection()
 
@@ -273,7 +321,6 @@ def get_decision_metadata(
 ) -> Optional[dict]:
     """Return decision and human review metadata."""
     init_email_db()
-    _ensure_schema()
 
     conn = get_connection()
 
@@ -310,34 +357,85 @@ def review_email(
     note: str,
 ) -> None:
     """
-    Complete or update a human review.
+    Update the human review state for an email.
 
-    Example statuses:
+    Supported review statuses:
+    - pending
     - approved
     - rejected
     - resolved
-    - pending
     """
+    allowed_statuses = {
+        "pending",
+        "approved",
+        "rejected",
+        "resolved",
+    }
+
+    if review_status not in allowed_statuses:
+        raise ValueError(
+            f"Invalid review status: {review_status}. "
+            f"Expected one of: "
+            f"{', '.join(sorted(allowed_statuses))}"
+        )
+
+    if not message_id.strip():
+        raise ValueError("message_id cannot be empty.")
+
+    if note is None:
+        note = ""
+
     init_email_db()
-    _ensure_schema()
 
     conn = get_connection()
 
-    conn.execute(
+    existing = conn.execute(
         """
-        UPDATE emails
-        SET
-            human_review_status = ?,
-            human_review_note = ?,
-            reviewed_at = CURRENT_TIMESTAMP
+        SELECT message_id
+        FROM emails
         WHERE message_id = ?
         """,
-        (
-            review_status,
-            note,
-            message_id,
-        ),
-    )
+        (message_id,),
+    ).fetchone()
+
+    if existing is None:
+        conn.close()
+        raise ValueError(
+            f"Email not found: {message_id}"
+        )
+
+    if review_status == "pending":
+        conn.execute(
+            """
+            UPDATE emails
+            SET
+                human_review_status = ?,
+                human_review_note = ?,
+                reviewed_at = NULL
+            WHERE message_id = ?
+            """,
+            (
+                review_status,
+                note,
+                message_id,
+            ),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE emails
+            SET
+                human_review_status = ?,
+                human_review_note = ?,
+                reviewed_at = CURRENT_TIMESTAMP
+            WHERE message_id = ?
+            """,
+            (
+                review_status,
+                note,
+                message_id,
+            ),
+        )
 
     conn.commit()
     conn.close()
@@ -349,14 +447,51 @@ def save_reply(
     recipient: str,
     subject: str,
     body: str,
-) -> None:
+) -> str:
     """
-    Save an outgoing reply as part of the email thread.
+    Save an outgoing support reply as a separate message.
+
+    The reply receives its own unique message ID so it never
+    conflicts with the incoming email's primary key.
+
+    Returns:
+        The generated reply message ID.
     """
+    if not message_id.strip():
+        raise ValueError("message_id cannot be empty.")
+
+    if not thread_id.strip():
+        raise ValueError("thread_id cannot be empty.")
+
+    if not recipient.strip():
+        raise ValueError("recipient cannot be empty.")
+
+    if not subject.strip():
+        raise ValueError("subject cannot be empty.")
+
+    if not body.strip():
+        raise ValueError("body cannot be empty.")
+
     init_email_db()
-    _ensure_schema()
 
     conn = get_connection()
+
+    base_reply_id = f"reply-{message_id}"
+    reply_message_id = base_reply_id
+    counter = 1
+
+    while conn.execute(
+        """
+        SELECT 1
+        FROM emails
+        WHERE message_id = ?
+        """,
+        (reply_message_id,),
+    ).fetchone() is not None:
+        reply_message_id = (
+            f"{base_reply_id}-{counter}"
+        )
+        counter += 1
 
     conn.execute(
         """
@@ -373,17 +508,16 @@ def save_reply(
             message_type
         )
         VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?
         )
         """,
         (
-            message_id,
+            reply_message_id,
             thread_id,
             "support",
             recipient,
             subject,
             body,
-            "CURRENT_TIMESTAMP",
             "",
             "sent",
             "reply",
@@ -393,13 +527,14 @@ def save_reply(
     conn.commit()
     conn.close()
 
+    return reply_message_id
+
 
 def get_replies_for_thread(
     thread_id: str,
 ) -> list[dict]:
-    """Return all replies belonging to a thread."""
+    """Return all support replies belonging to a thread."""
     init_email_db()
-    _ensure_schema()
 
     conn = get_connection()
 
@@ -412,11 +547,14 @@ def get_replies_for_thread(
             recipient,
             subject,
             body,
+            timestamp,
             created_at
         FROM emails
         WHERE thread_id = ?
-        AND message_type = 'reply'
-        ORDER BY created_at ASC
+          AND message_type = 'reply'
+        ORDER BY
+            COALESCE(timestamp, created_at) ASC,
+            rowid ASC
         """,
         (thread_id,),
     ).fetchall()
