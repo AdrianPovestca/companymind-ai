@@ -28,26 +28,54 @@ class GmailEmailConnector(EmailConnector):
 
     def _authenticate(self) -> None:
         creds = None
+        
+        # Try to load existing token
         if os.path.exists(self.token_path):
             creds = Credentials.from_authorized_user_file(self.token_path, SCOPES)
-            logger.info("Loaded existing Gmail token")
+            logger.info("✅ Loaded existing Gmail token")
         
+        # If no valid token, get new one
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
-                logger.info("Refreshed Gmail token")
+                logger.info("🔄 Refreshed Gmail token")
             else:
+                # First time auth - manual flow
                 flow = InstalledAppFlow.from_client_secrets_file(
                     self.credentials_path, SCOPES
                 )
-                creds = flow.run_local_server(port=0)
-                logger.info("Gmail OAuth2 authorized")
+                
+                # Get auth URL
+                auth_url, _ = flow.authorization_url(prompt='consent')
+                
+                print("\n" + "="*70)
+                print("🔗 GMAIL AUTHORIZATION REQUIRED")
+                print("="*70)
+                print(f"Copy & paste this link in your browser:\n")
+                print(f"{auth_url}\n")
+                print("After authorizing:")
+                print("1. You'll be redirected to localhost (may show error - OK!)")
+                print("2. Copy the CODE from the URL (after code=)")
+                print("3. Paste it below\n")
+                print("="*70)
+                
+                code = input("📋 Paste authorization code here: ").strip()
+                
+                try:
+                    flow.fetch_token(code=code)
+                    creds = flow.credentials
+                    logger.info("✅ Gmail authorization successful")
+                except Exception as e:
+                    logger.error(f"Authorization failed: {e}")
+                    raise
             
+            # Save token for reuse
             with open(self.token_path, "w") as token_file:
                 token_file.write(creds.to_json())
+                logger.info(f"💾 Token saved to {self.token_path}")
         
         self.service = build("gmail", "v1", credentials=creds)
-        logger.info("Gmail service ready")
+        logger.info("✅ Gmail service ready!")
 
     def fetch_unread_emails(self) -> List[Email]:
         try:
@@ -57,7 +85,8 @@ class GmailEmailConnector(EmailConnector):
                 maxResults=10
             ).execute()
             messages = results.get("messages", [])
-            logger.info(f"Found {len(messages)} unread emails")
+            logger.info(f"📧 Found {len(messages)} unread emails")
+            
             emails = []
             for message in messages:
                 email_obj = self._parse_gmail_message(message["id"])
@@ -75,10 +104,11 @@ class GmailEmailConnector(EmailConnector):
                 id=message_id,
                 format="full"
             ).execute()
+            
             headers = message["payload"]["headers"]
             subject = next((h["value"] for h in headers if h["name"] == "Subject"), "")
-            from_email = next((h["value"] for h in headers if h["name"] == "From"), "")
-            to_email = next((h["value"] for h in headers if h["name"] == "To"), "")
+            sender = next((h["value"] for h in headers if h["name"] == "From"), "")
+            recipient = next((h["value"] for h in headers if h["name"] == "To"), "")
             date_str = next((h["value"] for h in headers if h["name"] == "Date"), "")
             
             body = ""
@@ -97,16 +127,17 @@ class GmailEmailConnector(EmailConnector):
             email = Email(
                 message_id=message_id,
                 subject=subject,
-                from_address=from_email,
-                to_address=to_email,
+                sender=sender,
+                recipient=recipient,
                 body=body,
-                received_at=date_str,
-                raw_email=json.dumps(message)
+                timestamp=date_str,
+                thread_id=message.get("threadId", ""),
+                attachments=[]
             )
-            logger.info(f"Parsed Gmail message {message_id}")
+            logger.info(f"✅ Parsed: {subject[:30]}")
             return email
         except Exception as e:
-            logger.error(f"Error parsing Gmail message: {e}")
+            logger.error(f"Error parsing message: {e}")
             return None
 
     def mark_as_read(self, message_id: str) -> None:
@@ -116,9 +147,9 @@ class GmailEmailConnector(EmailConnector):
                 id=message_id,
                 body={"removeLabelIds": ["UNREAD"]}
             ).execute()
-            logger.info(f"Marked message {message_id} as read")
+            logger.info(f"✅ Marked as read: {message_id[:20]}")
         except HttpError as error:
-            logger.error(f"Error marking message as read: {error}")
+            logger.error(f"Error marking as read: {error}")
 
     def send_reply(self, message_id: str, reply_text: str) -> Optional[str]:
         try:
@@ -127,6 +158,7 @@ class GmailEmailConnector(EmailConnector):
                 id=message_id,
                 format="full"
             ).execute()
+            
             thread_id = original["threadId"]
             headers = original["payload"]["headers"]
             from_header = next((h["value"] for h in headers if h["name"] == "From"), "")
@@ -140,16 +172,15 @@ class GmailEmailConnector(EmailConnector):
             message = MIMEText(reply_text)
             message["to"] = reply_to
             message["subject"] = f"Re: {subject}" if not subject.startswith("Re:") else subject
-            message["In-Reply-To"] = message_id
-            message["References"] = message_id
             
             raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
-            sent_message = self.service.users().messages().send(
+            sent = self.service.users().messages().send(
                 userId=self.user_id,
                 body={"raw": raw_message, "threadId": thread_id}
             ).execute()
-            logger.info(f"Sent reply: {sent_message['id']}")
-            return sent_message["id"]
+            
+            logger.info(f"✅ Sent reply: {sent['id'][:20]}")
+            return sent["id"]
         except HttpError as error:
             logger.error(f"Error sending reply: {error}")
             return None

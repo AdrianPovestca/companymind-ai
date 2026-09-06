@@ -39,3 +39,7 @@ EmailProviderRegistry.register("mock", MockEmailConnector)
 
 from src.gmail_email_connector import GmailEmailConnector
 EmailProviderRegistry.register("gmail", GmailEmailConnector)
+
+from src.yahoo_email_connector import YahooEmailConnector
+
+from src.yahoo_email_connector import YahooEmailConnector
