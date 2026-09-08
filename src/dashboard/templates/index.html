@@ -4,65 +4,88 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Email Agent Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="dashboard">
-        <!-- Header -->
         <header class="header">
             <h1>📧 Email Agent Dashboard</h1>
             <div class="stats">
                 <div class="stat-card">
-                    <span class="stat-label">Pending</span>
-                    <span class="stat-value" id="pending-count">0</span>
+                    <div class="stat-label">Pending Review</div>
+                    <div class="stat-value" id="pending-count">0</div>
                 </div>
                 <div class="stat-card">
-                    <span class="stat-label">Auto-Replied</span>
-                    <span class="stat-value" id="auto-count">0</span>
+                    <div class="stat-label">Auto-Replied</div>
+                    <div class="stat-value" id="auto-count">0</div>
+                </div>
+# Stop Flask (Ctrl+C)
+
+# Verify file exists
+ls -la src/dashboard/templates/index.html
+
+# If it doesn't exist, recreate it
+cat > src/dashboard/templates/index.html << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Agent Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="dashboard">
+        <header class="header">
+            <h1>📧 Email Agent Dashboard</h1>
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-label">Pending Review</div>
+                    <div class="stat-value" id="pending-count">0</div>
                 </div>
                 <div class="stat-card">
-                    <span class="stat-label">Reviewed</span>
-                    <span class="stat-value" id="reviewed-count">0</span>
+                    <div class="stat-label">Auto-Replied</div>
+                    <div class="stat-value" id="auto-count">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Processed</div>
+                    <div class="stat-value" id="total-count">0</div>
                 </div>
             </div>
         </header>
 
-        <!-- Main Content -->
         <main class="container">
             <div class="email-list" id="email-list">
                 <p class="loading">Loading emails...</p>
             </div>
 
             <div class="email-detail" id="email-detail" style="display: none;">
-                <button class="btn-back" onclick="closeDetail()">← Back</button>
-                <div class="email-content">
-                    <h2 id="detail-subject"></h2>
-                    <p class="email-meta">
-                        <span>From: <strong id="detail-sender"></strong></span>
-                        <span id="detail-date"></span>
-                    </p>
-                    <div class="email-body" id="detail-body"></div>
-                    
-                    <div class="suggested-reply">
-                        <h3>Suggested Reply:</h3>
-                        <textarea id="reply-text" readonly></textarea>
-                    </div>
+                <button class="btn-back" onclick="closeDetail()">← Back to List</button>
+                <h2 id="detail-subject"></h2>
+                <div class="email-meta">
+                    <div>From: <strong id="detail-sender"></strong></div>
+                    <div id="detail-date"></div>
+                </div>
+                <div class="email-body" id="detail-body"></div>
+                
+                <div class="suggested-reply">
+                    <h3>Notes</h3>
+                    <textarea id="reply-text" readonly></textarea>
+                </div>
 
-                    <div class="actions">
-                        <button class="btn btn-approve" onclick="approveEmail()">✓ Approve</button>
-                        <button class="btn btn-edit" onclick="editReply()">✏️ Edit</button>
-                        <button class="btn btn-reject" onclick="rejectEmail()">✗ Reject</button>
-                    </div>
+                <div class="actions">
+                    <button class="btn btn-approve" onclick="approveEmail()">✓ Approve</button>
+                    <button class="btn btn-reject" onclick="rejectEmail()">✗ Escalate</button>
                 </div>
             </div>
         </main>
     </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="/static/script.js"></script>
     <script>
         loadStats();
         loadPendingEmails();
-        setInterval(loadPendingEmails, 5000); // Refresh every 5 seconds
+        setInterval(loadPendingEmails, 5000);
     </script>
 </body>
 </html>
