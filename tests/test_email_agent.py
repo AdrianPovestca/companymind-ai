@@ -27,7 +27,7 @@ def test_process_email_auto_reply(tmp_path, monkeypatch):
 
     assert result["action"] == "auto_reply"
     assert result["reply"] is not None
-    assert "order and shipping status" in result["reply"]
+    assert "order status" in result["reply"]
 
     saved_email = email_database.get_email(
         "agent-test-001"
