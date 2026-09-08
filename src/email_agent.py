@@ -48,7 +48,7 @@ from src.email_database import (
 from src.email_decision import decide_action
 from src.email_models import Email
 from src.email_parser import parse_email
-from src.email_responder import generate_reply
+from src.email_smart_responder import create_smart_responder
 from src.email_thread import get_thread
 
 
@@ -167,10 +167,12 @@ def process_email(
             )
 
         else:
-            reply = generate_reply(
-                email=email,
-                analysis=analysis,
-                thread=thread,
+            responder = create_smart_responder("Your Company")
+            reply = responder.generate_reply(
+                subject=email.subject,
+                body=email.body,
+                intent=analysis.intent,
+                language=analysis.language
             )
 
             save_reply(
