@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Platform Admin Panel</title>
+    <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+    <div class="admin-panel">
+        <header class="header">
+            <h1>🏢 Platform Admin Panel</h1>
+            <div class="stats">
+                <div class="stat">
+                    <span class="label">Businesses</span>
+                    <span class="value" id="stat-businesses">0</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Users</span>
+                    <span class="value" id="stat-users">0</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Documents</span>
+                    <span class="value" id="stat-docs">0</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="container">
+            <nav class="sidebar">
+                <button class="nav-btn active" onclick="showSection('businesses')">📊 Businesses</button>
+                <button class="nav-btn" onclick="showSection('users')">👥 Users</button>
+                <button class="nav-btn" onclick="showSection('api-keys')">🔑 API Keys</button>
+                <button class="nav-btn" onclick="showSection('knowledge')">📚 Knowledge Base</button>
+                <button class="nav-btn" onclick="showSection('agents')">🤖 Agents</button>
+                <button class="nav-btn" onclick="showSection('audit')">📋 Audit Log</button>
+            </nav>
+
+            <div class="content">
+                <!-- Businesses Section -->
+                <div id="businesses-section" class="section">
+                    <h2>Businesses</h2>
+                    <button onclick="showCreateBusiness()" class="btn btn-primary">+ New Business</button>
+                    <div id="businesses-list"></div>
+                </div>
+
+                <!-- Users Section -->
+                <div id="users-section" class="section" style="display: none;">
+                    <h2>Users</h2>
+                    <p>Select a business to manage users</p>
+                </div>
+
+                <!-- API Keys Section -->
+                <div id="api-keys-section" class="section" style="display: none;">
+                    <h2>API Keys</h2>
+                    <p>Select a business to manage API keys</p>
+                </div>
+
+                <!-- Knowledge Base Section -->
+                <div id="knowledge-section" class="section" style="display: none;">
+                    <h2>Knowledge Base</h2>
+                    <p>Select a business to manage documents</p>
+                </div>
+
+                <!-- Agents Section -->
+                <div id="agents-section" class="section" style="display: none;">
+                    <h2>Agents</h2>
+                    <p>Select a business to configure agents</p>
+                </div>
+
+                <!-- Audit Log Section -->
+                <div id="audit-section" class="section" style="display: none;">
+                    <h2>Audit Log</h2>
+                    <p>Select a business to view audit log</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/admin.js"></script>
+    <script>
+        loadStats();
+        loadBusinesses();
+    </script>
+</body>
+</html>
