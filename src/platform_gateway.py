@@ -160,3 +160,8 @@ if __name__ == '__main__':
     app = create_gateway_app()
     print("✅ API Gateway starting on http://0.0.0.0:5001")
     app.run(debug=True, host='0.0.0.0', port=5001)
+
+# ===== ADD THIS TO EXISTING GATEWAY =====
+# Update the process_email endpoint to use platform integration:
+
+# Replace old process_email with this in platform_gateway.py
