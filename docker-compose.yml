@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # Email Dashboard
+  dashboard:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - PLATFORM_DB_PATH=/data/platform.db
+    volumes:
+      - ./emails.db:/data/emails.db
+      - ./platform.db:/data/platform.db
+
+  # Platform Gateway
+  gateway:
+    build: .
+    ports:
+      - "5001:5001"
+    environment:
+      - FLASK_ENV=production
+      - PLATFORM_DB_PATH=/data/platform.db
+    volumes:
+      - ./platform.db:/data/platform.db
+    depends_on:
+      - dashboard
+
+  # Admin Panel
+  admin:
+    build: .
+    ports:
+      - "5002:5002"
+    environment:
+      - FLASK_ENV=production
+      - PLATFORM_DB_PATH=/data/platform.db
+    volumes:
+      - ./platform.db:/data/platform.db
+    depends_on:
+      - gateway
