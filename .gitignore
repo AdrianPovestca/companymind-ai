@@ -3,3 +3,6 @@ __pycache__/
 emails.db
 gmail_credentials.json
 platform.db
+gmail_token.pickle
+gmail_oauth_credentials.json
+client_secret_*.json
