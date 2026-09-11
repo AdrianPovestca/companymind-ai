@@ -1,12 +1,13 @@
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
+from pathlib import Path
 import sys
 sys.path.insert(0, '/workspaces/companymind-ai')
 from src.email_database import get_connection
 
 app = Flask(__name__)
-app.template_folder = '/workspaces/companymind-ai/src/dashboard/templates'
-app.static_folder = '/workspaces/companymind-ai/src/static'
+app.template_folder = str(Path(__file__).resolve().parent / 'templates')
+app.static_folder = str(Path(__file__).resolve().parent.parent / 'static')
 app.static_url_path = '/static'
 CORS(app)
 
