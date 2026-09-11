@@ -9,3 +9,5 @@ client_secret_*.json
 
 # Local OAuth token
 token.json
+
+gmail_token.json
