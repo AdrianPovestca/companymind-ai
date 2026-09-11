@@ -6,3 +6,6 @@ platform.db
 gmail_token.pickle
 gmail_oauth_credentials.json
 client_secret_*.json
+
+# Local OAuth token
+token.json
