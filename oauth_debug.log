@@ -1,0 +1,16 @@
+INFO:__main__:Gmail connector initialized
+INFO:__main__:Starting Gmail OAuth browser flow
+Testing Gmail connector...
+
+
+======================================================================
+GMAIL AUTHORIZATION
+======================================================================
+
+Open this URL in your browser:
+
+https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=1038299602593-fb79sh635luvta857mv5khgu1clbdqf2.apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fmusical-space-eureka-qv7wj96wx7qqhxrgx-40271.app.github.dev%2F&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.modify&state=hejMCtKig364pJgMPdnraemCIxmJY5&code_challenge=q_6ywY1yqNHAVoLhixmAlyTtZwh0CBvVTvJW7aqd-Is&code_challenge_method=S256&access_type=offline&include_granted_scopes=true&prompt=consent
+
+======================================================================
+
+Gmail connector error: (invalid_grant) Invalid code verifier.

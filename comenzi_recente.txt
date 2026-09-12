@@ -1,0 +1,100 @@
+ 1744  )
+ 1745  # Dezactivăm cerința strictă de HTTPS pentru teste locale
+ 1746  import os
+ 1747  os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+ 1748  # Utilizăm modul OOB (Out-of-band) special pentru terminal
+ 1749  auth_url, _ = flow.authorization_url(prompt='consent')
+ 1750  print('\n1. Deschide acest link în browser:\n', auth_url)
+ 1751  code = input('\n2. Introdu codul primit pe ecran aici: ')
+ 1752  flow.fetch_token(code=code.strip())
+ 1753  with open('token.json', 'w') as token_file:
+ 1754      token_file.write(flow.credentials.to_json())
+ 1755  print('\n✅ Token.json a fost generat cu succes!')
+ 1756  "
+ 1757  ls -la src/
+ 1758  bash verify_email_agent.sh
+ 1759  PYTHONPATH=. python src/gmail_email_connector.py
+ 1760  PYTHONPATH=. python src/email_agent_runner.py
+ 1761  PYTHONPATH=. python src/gmail_email_connector.py
+ 1762  PYTHONPATH=. python -c "
+ 1763  from google_auth_oauthlib.flow import InstalledAppFlow
+ 1764  import os
+ 1765  os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+ 1766  flow = InstalledAppFlow.from_client_secrets_file(
+ 1767      'gmail_oauth_credentials.json',
+ 1768      scopes=['https://mail.google.com/'],
+ 1769      redirect_uri='urn:ietf:wg:oauth:2.0:oob'
+ 1770  )
+ 1771  auth_url, _ = flow.authorization_url(prompt='consent')
+ 1772  print('\n1. Deschide acest link în browser:\n', auth_url)
+ 1773  code = input('\n2. Introdu codul primit pe ecran aici: ')
+ 1774  flow.fetch_token(code=code.strip())
+ 1775  with open('token.json', 'w') as token_file:
+ 1776      token_file.write(flow.credentials.to_json())
+ 1777  print('\n✅ Token.json a fost generat cu succes!')
+ 1778  "
+ 1779  PYTHONPATH=. python src/gmail_email_connector.py
+ 1780  PYTHONPATH=. python src/platform_email_agent.py
+ 1781  docker compose up -d
+ 1782  mkdir -p src/dashboard/templates
+ 1783  cp index.html src/dashboard/templates/index.html
+ 1784  docker compose restart
+ 1785  docker compose up -d --build
+ 1786  find . -name "index.html"
+ 1787  import os
+ 1788  from flask import Flask, render_template
+ 1789  # Determinăm calea absolută către folderul 'templates'
+ 1790  template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'templates'))
+ 1791  app = Flask(__name__, template_folder=template_dir)
+ 1792  @app.route('/')
+ 1793  def index():
+ 1794  mkdir -p src/dashboard/templates
+ 1795  cp index.html src/dashboard/templates/index.html
+ 1796  docker compose build --no-cache dashboard
+ 1797  docker compose up -d dashboard
+ 1798  docker compose logs dashboard --tail=20
+ 1799  mkdir -p src/dashboard/templates
+ 1800  cp index.html src/dashboard/templates/
+ 1801  cp src/static/index.html src/dashboard/templates/ 2>/dev/null || cp index.html src/dashboard/templates/
+ 1802  find . -name "*.html"
+ 1803  mkdir -p src/dashboard/templates
+ 1804  cp index.html src/dashboard/templates/index.html 2>/dev/null || cp src/static/index.html src/dashboard/templates/index.html 2>/dev/null
+ 1805  mkdir -p src/dashboard/templates
+ 1806  cp index.html src/dashboard/templates/index.html
+ 1807  docker compose restart dashboard
+ 1808  docker compose down && docker compose up -d
+ 1809  docker compose logs dashboard --tail=30
+ 1810  docker compose down && docker compose up -d
+ 1811  curl -I http://localhost:5000
+ 1812  docker compose logs dashboard --tail=50
+ 1813  curl -i http://localhost:5000
+ 1814  mkdir -p templates && cp index.html templates/index.html
+ 1815  curl -i http://localhost:5000
+ 1816  mkdir -p /app/src/dashboard/templates
+ 1817  echo "<h1>Dashboard Active</h1>" > /app/src/dashboard/templates/index.html
+ 1818  curl -i http://localhost:5000
+ 1819  # 1. Creează directorul templates în workspace-ul curent
+ 1820  mkdir -p src/dashboard/templates
+ 1821  # 2. Creează fișierul index.html
+ 1822  echo "<h1>Dashboard Active</h1>" > src/dashboard/templates/index.html
+ 1823  curl -i http://localhost:5000
+ 1824  docker ps
+ 1825  docker exec -it <container_id> mkdir -p /app/src/dashboard/templates
+ 1826  docker exec -it <container_id> bash -c 'echo "<h1>Dashboard Active</h1>" > /app/src/dashboard/templates/index.html'
+ 1827  curl -i http://localhost:5000
+ 1828  docker exec -it companymind-ai-dashboard-1 mkdir -p /app/src/dashboard/templates
+ 1829  docker exec -it companymind-ai-dashboard-1 bash -c 'echo "<h1>Dashboard Active</h1>" > /app/src/dashboard/templates/index.html'
+ 1830  curl -i http://localhost:5000
+ 1831  docker exec -it companymind-ai-dashboard-1 mkdir -p /app/src/dashboard/templates /app/templates
+ 1832  docker exec -it companymind-ai-dashboard-1 bash -c 'echo "<h1>Dashboard Active</h1>" > /app/src/dashboard/templates/index.html'
+ 1833  docker exec -it companymind-ai-dashboard-1 bash -c 'echo "<h1>Dashboard Active</h1>" > /app/templates/index.html'
+ 1834  curl -i http://localhost:5000
+ 1835  docker exec -it companymind-ai-dashboard-1 pwd
+ 1836  docker exec -it companymind-ai-dashboard-1 ls -la /app
+ 1837  docker exec -it companymind-ai-dashboard-1 ls -la /app/src/dashboard
+ 1838  docker restart companymind-ai-dashboard-1
+ 1839  docker exec -it companymind-ai-dashboard-1 bash -c 'echo "<h1>Dashboard Active</h1>" > /app/templates/index.html'
+ 1840  docker exec -it companymind-ai-dashboard-1 cp /app/index.html /app/templates/index.html
+ 1841  curl -i http://localhost:5000
+ 1842  history 50
+ 1843  history 100 > comenzi_recente.txt && cat comenzi_recente.txt
