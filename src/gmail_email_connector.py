@@ -9,10 +9,12 @@ import logging
 import os
 from email.mime.text import MIMEText
 from typing import List, Optional
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -22,7 +24,16 @@ from src.email_models import Email
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://mail.google.com/"
+]
+
+REDIRECT_URI = (
+    "https://musical-space-eureka-qv7wj96wx7qqhxrgx-40271.app.github.dev/"
+)
+
+CALLBACK_PORT = 40271
 
 
 class GmailEmailConnector(EmailConnector):
@@ -57,16 +68,78 @@ class GmailEmailConnector(EmailConnector):
                 creds.refresh(Request())
                 logger.info("Gmail token refreshed")
             else:
-                flow = InstalledAppFlow.from_client_secrets_file(
+                flow = Flow.from_client_secrets_file(
                     self.credentials_path,
-                    SCOPES,
+                    scopes=SCOPES,
                 )
+
+                flow.redirect_uri = REDIRECT_URI
+
+                authorization_url, state = flow.authorization_url(
+                    access_type="offline",
+                    include_granted_scopes="true",
+                    prompt="consent",
+                )
+
+                callback_data = {}
+
+                class OAuthHandler(BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        parsed = urlparse(self.path)
+                        params = parse_qs(parsed.query)
+
+                        callback_data["code"] = params.get("code", [None])[0]
+                        callback_data["state"] = params.get("state", [None])[0]
+                        callback_data["error"] = params.get("error", [None])[0]
+
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html")
+                        self.end_headers()
+
+                        self.wfile.write(
+                            b"<html><body><h2>Gmail authorization received.</h2>"
+                            b"<p>You can return to the terminal.</p></body></html>"
+                        )
+
+                    def log_message(self, format, *args):
+                        return
 
                 logger.info("Starting Gmail OAuth browser flow")
 
-                # Opens the browser automatically and uses an available
-                # local port for the OAuth callback.
-                creds = flow.run_local_server(port=0)
+                print("\n" + "=" * 70)
+                print("GMAIL AUTHORIZATION")
+                print("=" * 70)
+                print("\nOpen this URL in your browser:\n")
+                print(authorization_url)
+                print("\n" + "=" * 70)
+                print()
+
+                server = HTTPServer(
+                    ("0.0.0.0", CALLBACK_PORT),
+                    OAuthHandler,
+                )
+
+                while "code" not in callback_data and "error" not in callback_data:
+                    server.handle_request()
+
+                server.server_close()
+
+                if callback_data.get("error"):
+                    raise RuntimeError(
+                        f"Google OAuth returned an error: "
+                        f"{callback_data['error']}"
+                    )
+
+                authorization_code = callback_data.get("code")
+
+                if not authorization_code:
+                    raise RuntimeError(
+                        "Google OAuth did not return an authorization code."
+                    )
+
+                flow.fetch_token(code=authorization_code)
+
+                creds = flow.credentials
 
                 logger.info("Gmail authorization successful")
 
