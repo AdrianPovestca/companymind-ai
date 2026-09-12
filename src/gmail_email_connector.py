@@ -1,4 +1,6 @@
 """
+import sys
+sys.path.insert(0, "/workspaces/companymind-ai")
 Gmail Email Connector.
 
 Uses Google OAuth2 Desktop flow with a local callback server.
@@ -421,12 +423,25 @@ if __name__ == "__main__":
 
         print(f"Found {len(emails)} unread emails\n")
 
+        from src.gmail_to_db import save_email_to_db
+        
         for email_obj in emails:
             print(f"Subject: {email_obj.subject}")
             print(f"From: {email_obj.sender}")
             print(f"To: {email_obj.recipient}")
             print(f"Thread: {email_obj.thread_id}")
             print()
+            
+            # Save to database
+            save_email_to_db({
+                'message_id': email_obj.thread_id,
+                'thread_id': email_obj.thread_id,
+                'subject': email_obj.subject,
+                'sender': email_obj.sender,
+                'recipient': email_obj.recipient,
+                'body': email_obj.body[:500] if hasattr(email_obj, 'body') else '',
+                'timestamp': email_obj.timestamp if hasattr(email_obj, 'timestamp') else None
+            })
 
         print("GMAIL CONNECTOR WORKING")
 
