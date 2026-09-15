@@ -11,3 +11,4 @@ client_secret_*.json
 token.json
 
 gmail_token.json
+.env
