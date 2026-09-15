@@ -84,3 +84,21 @@ def reject(email_id):
 if __name__ == '__main__':
     print("✅ Dashboard running on http://0.0.0.0:5000")
     app.run(debug=True, host='0.0.0.0', port=5000)
+
+# ===== AUTO-PROCESS EMAILS =====
+@app.route('/api/process-emails', methods=['POST'])
+def process_emails():
+    """Trigger smart email processing"""
+    try:
+        import subprocess
+        # Run smart agent
+        result = subprocess.run(['python', 'src/smart_email_agent.py'], 
+                              capture_output=True, text=True, timeout=30)
+        
+        # Run reply sender
+        subprocess.run(['python', 'src/gmail_reply_sender.py'], 
+                      capture_output=True, text=True, timeout=30)
+        
+        return jsonify({'ok': True, 'message': 'Email processing started'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
