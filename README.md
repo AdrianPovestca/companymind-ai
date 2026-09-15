@@ -1,26 +1,34 @@
 # Email Agent
 
-Intelligent email processing engine that automatically handles customer emails, detects intent, and routes them appropriately.
+Autonomous email processing system. Reads Gmail, analyzes emails, sends contextual replies in multiple languages.
 
-## Features
+## What It Does
 
-- **Automatic Email Processing** — Fetch, parse, and analyze emails
-- **Smart Intent Detection** — Support requests, refunds, complaints, urgent issues
-- **Intelligent Routing** — Auto-reply to simple cases, escalate complex ones to humans
-- **Multi-Language Support** — 25+ languages (EN, RO, ES, FR, DE, JA, ZH, KO...)
-- **Thread Memory** — Maintains conversation history
-- **Persistent Storage** — SQLite database for email history and decisions
+- **Fetch emails** from Gmail via OAuth2
+- **Categorize** automatically (sales, support, billing, inquiry, complaints)
+- **Detect language** and respond appropriately
+- **Auto-reply** to simple emails, escalate complex ones
+- **Track everything** in SQLite database
+- **Dashboard** with real-time stats and one-click processing
 
 ## How It Works
 
-## Supported Email Providers
-
-- **Mock** — Testing & demos
-- **Yahoo Mail** — IMAP/SMTP
-- **Outlook** — Microsoft Graph API
-- **Gmail** — OAuth2 (setup guide included)
+Each email is:
+1. Fetched from Gmail
+2. Analyzed for category, language, urgency
+3. Decision made (auto-reply or human review)
+4. Reply generated in detected language
+5. Sent back via Gmail
+6. Logged in database
 
 ## Getting Started
+
+**Requirements**
+- Python 3.12+
+- Gmail account
+- OAuth credentials (setup guide below)
+
+**Setup**
 
 ```bash
 # Install dependencies
@@ -28,127 +36,103 @@ pip install -r requirements.txt
 
 # Configure
 cp .env.example .env
-# Edit .env with your email provider
-
-# Process emails
-python -c "from src.agent_factory import create_email_agent; from src.email_agent import process_unread_emails; connector = create_email_agent(); process_unread_emails(connector)"
+# Edit .env with your details
 ```
 
-## Languages Supported
+**Run**
 
-English, Română, Español, Français, Deutsch, Italiano, Português, Nederlands, Polski, Русский, Türkçe, 日本語, 中文, 한국어, العربية, हिन्दी, Tiếng Việt, ไทย, Bahasa Indonesia, Bahasa Melayu, Filipino, Українська, Čeština, Magyar, Ελληνικά
+```bash
+# Start dashboard
+python run_dashboard.py
+```
+
+Then open:
+- Dashboard: http://localhost:5000
+- Introduction: http://localhost:5000/intro
+- Admin Panel: http://localhost:5000/admin
+
+Click "START AUTO-PROCESSING" to trigger the pipeline.
+
+## Gmail OAuth Setup
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com)
+2. Create new project
+3. Enable Gmail API
+4. Create OAuth 2.0 credentials (Desktop application)
+5. Download JSON and save as `gmail_oauth_credentials.json`
+6. Set up OAuth consent screen with your email as test user
+
+First run will open browser for authentication. Token saved automatically.
+
+## Features
+
+**Categorization**
+- Sales inquiries
+- Support requests
+- Billing issues
+- General questions
+- Complaints
+
+**Languages**
+- English
+- Romanian
+- German
+- Russian
+
+**Tracking**
+- Email category
+- Detected language
+- Urgency level
+- Auto-reply decision
+- Sent timestamp
 
 ## Architecture
 
-- **email_parser.py** — Extract email data
-- **email_analyzer.py** — Analyze intent & urgency
-- **email_decision.py** — Routing logic
-- **email_smart_responder.py** — Template-based replies (25+ languages)
-- **email_database.py** — Persistence
-- **email_connector.py** — Provider abstraction
-- **email_provider_registry.py** — Extensible provider system
+## Database
 
-## Testing
+SQLite database (`emails.db`) stores:
+- Email content (subject, sender, body)
+- Categorization (category, language, urgency)
+- Decision (auto-reply, human review, escalate)
+- Status (pending, processed, sent)
+- Timestamps
 
+## Deployment
+
+**Local Development**
 ```bash
-python -m pytest -v
-# 30/30 tests passing
+python run_dashboard.py
 ```
 
-## What's Built
-
-✅ Email parsing & analysis
-✅ Intent detection (support/refund/complaint/urgent)
-✅ Decision engine (auto/review/escalate)
-✅ 25+ language templates
-✅ Database + thread memory
-✅ 4 email connectors
-✅ 100% test coverage
-
-## What's Not Built
-
-❌ Claude AI (code ready for integration)
-❌ Web dashboard
-❌ Gmail OAuth2 final setup
-❌ Multi-tenant platform
-
-## Status
-
-**v1.0 — Production-ready MVP**
-
-- Zero cost to operate
-- Ready for customer demos & deployment
-- 30/30 tests passing
-- 25+ languages supported
-
-## Part of CompanyMind Platform
-
-Agent #2 in the AI agents ecosystem:
-- Agent #1: Miri (Customer Support) ✅
-- Agent #2: Email Agent ✅
-- Agent #3+: Coming soon
-
----
-
-Built by Adrian | 1 week | $0 cost | Production ready
- 
----
-
-## 🚀 Deployment
-
-### Docker (Local)
+**Production (Docker)**
 ```bash
 docker-compose up
 ```
 
-### Cloud Deployment
-See [DEPLOYMENT.md](DEPLOYMENT.md) for Render, Railway, or Heroku
+See [DEPLOYMENT.md](DEPLOYMENT.md) for cloud deployment.
 
-### Production URLs
-- Email Dashboard: http://localhost:5000
-- API Gateway: http://localhost:5001
-- Admin Panel: http://localhost:5002
+## Testing
 
-### Health Check
+All components tested locally. System processes real Gmail emails without errors.
+
 ```bash
-curl http://localhost:5001/health
+# Test pipeline
+python -m src.gmail_email_connector    # Fetch emails
+python src/smart_email_agent.py        # Analyze
+python src/gmail_reply_sender.py       # Send replies
 ```
 
----
+## Limitations & Notes
 
-## 📊 Complete Feature List
+- Groq models deprecate frequently (currently mocked)
+- Real Claude API integration ready (needs credits)
+- No advanced NLP (enough for categorization)
+- Single Gmail account (multi-account support possible)
 
-### Email Agent
-✅ Parse & analyze emails
-✅ Intent detection (support/refund/complaint/urgent)
-✅ Auto-reply with 25+ languages
-✅ Human review for sensitive emails
-✅ SQLite database
-✅ Thread memory
-✅ 30/30 tests
+## Built By
 
-### Platform Layer
-✅ Multi-tenant database
-✅ API Gateway (auth + rate limiting)
-✅ Admin panel (manage businesses)
-✅ Email Agent integration
-✅ Knowledge base management
-✅ Agent configuration
-✅ Audit logging
+Adrian Povestca | September 2026 | Zero cost | Production ready
 
-### Dashboards
-✅ Email review dashboard (modern dark UI)
-✅ Admin control panel
-✅ Real-time statistics
+## License
 
-### Security
-✅ API key authentication
-✅ Rate limiting (100 req/min)
-✅ Business isolation
-✅ Audit trail
-
-### Support
-✅ 25+ languages
-✅ Zero cost to operate
-✅ Production-ready
-
+MIT

@@ -11,7 +11,7 @@ app.static_folder = str(Path(__file__).resolve().parent.parent / 'static')
 app.static_url_path = '/static'
 CORS(app)
 
-@app.route('/')
+@app.route('/dashboard')
 def index():
     return render_template('index.html')
 
@@ -102,3 +102,11 @@ def process_emails():
         return jsonify({'ok': True, 'message': 'Email processing started'})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/intro')
+def intro():
+    return render_template('intro.html')
+
+@app.route('/')
+def home():
+    return render_template('intro.html')
