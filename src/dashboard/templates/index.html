@@ -17,9 +17,11 @@
         .stat-number { font-size: 56px; font-weight: 700; color: #00d4ff; line-height: 1; margin-bottom: 15px; }
         .stat-label { font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
         .action-section { text-align: center; margin: 80px 0; }
-        .button { display: inline-block; padding: 18px 50px; background: linear-gradient(135deg, #00d4ff 0%, #00a8cc 100%); color: #000; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 16px; cursor: pointer; border: none; transition: 0.3s; box-shadow: 0 10px 30px rgba(0, 212, 255, 0.2); }
+        .button { display: inline-block; padding: 18px 50px; background: linear-gradient(135deg, #00d4ff 0%, #00a8cc 100%); color: #000; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 16px; cursor: pointer; border: none; transition: 0.3s; box-shadow: 0 10px 30px rgba(0, 212, 255, 0.2); margin: 10px; }
         .button:hover { transform: translateY(-2px); box-shadow: 0 15px 40px rgba(0, 212, 255, 0.3); }
         .button:active { transform: translateY(0); }
+        .button.secondary { background: linear-gradient(135deg, #9d1f44 0%, #7a1635 100%); }
+        .button.secondary:hover { box-shadow: 0 15px 40px rgba(157, 31, 68, 0.3); }
         .status { margin-top: 30px; padding: 20px; background: rgba(0, 212, 255, 0.1); border-radius: 8px; color: #00d4ff; display: none; border-left: 3px solid #00d4ff; }
         .status.show { display: block; animation: slideIn 0.3s ease; }
         @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
@@ -55,6 +57,7 @@
 
         <div class="action-section">
             <button class="button" id="btn" onclick="process()">Start Auto-Processing</button>
+            <a href="/review" class="button secondary">👁 Review Queue</a>
             <div class="status" id="status"></div>
         </div>
 
