@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Human Review Queue - Email Agent</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0f1419 0%, #1a1f2e 100%);
+            color: #f5f5f5;
+            padding: 40px 20px;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .header { margin-bottom: 40px; }
+        h1 { color: #d4a574; margin-bottom: 10px; font-size: 42px; }
+        .back-link { color: #00d4ff; text-decoration: none; font-size: 14px; }
+        .back-link:hover { text-decoration: underline; }
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 40px; }
+        .stat-card { background: #1a2332; padding: 20px; border-radius: 8px; text-align: center; border: 1px solid #2a3a4a; }
+        .stat-number { font-size: 42px; font-weight: 700; color: #9d1f44; }
+        .stat-label { color: #aaa; margin-top: 10px; font-size: 12px; text-transform: uppercase; }
+        .queue { display: grid; gap: 20px; }
+        .email-item {
+            background: #1a2332;
+            border-left: 4px solid #9d1f44;
+            padding: 25px;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        .email-item:hover { transform: translateX(5px); border-left-color: #d4a574; }
+        .email-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 15px; }
+        .email-from { color: #d4a574; font-weight: 600; }
+        .email-subject { font-size: 18px; font-weight: 600; margin: 10px 0; color: #f5f5f5; }
+        .email-preview { color: #aaa; font-size: 14px; line-height: 1.5; margin: 10px 0; }
+        .urgency-badge { 
+            background: #9d1f44;
+            color: #f5f5f5;
+            padding: 5px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .email-actions { margin-top: 15px; display: flex; gap: 10px; }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: 0.2s;
+            font-size: 14px;
+        }
+        .btn-resolve {
+            background: #d4a574;
+            color: #0f1419;
+        }
+        .btn-resolve:hover { background: #a67c52; }
+        .btn-later {
+            background: transparent;
+            color: #d4a574;
+            border: 1px solid #d4a574;
+        }
+        .btn-later:hover { background: #1a2332; }
+        .empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: #aaa;
+        }
+        .empty h2 { color: #d4a574; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a href="/dashboard" class="back-link">← Back to Dashboard</a>
+            <h1>📋 Human Review Queue</h1>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number" id="pending-count">0</div>
+                <div class="stat-label">Pending Review</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="resolved-count">0</div>
+                <div class="stat-label">Resolved</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="total-count">0</div>
+                <div class="stat-label">Total</div>
+            </div>
+        </div>
+        
+        <div id="queue" class="queue"></div>
+        <div id="empty" class="empty" style="display:none;">
+            <h2>✅ All Caught Up!</h2>
+            <p>No urgent emails waiting for review.</p>
+        </div>
+    </div>
+
+    <script>
+        async function loadQueue() {
+            try {
+                const response = await fetch('/api/human-review-queue');
+                const data = await response.json();
+                
+                const queueDiv = document.getElementById('queue');
+                const emptyDiv = document.getElementById('empty');
+                
+                if (!data.emails || data.emails.length === 0) {
+                    queueDiv.style.display = 'none';
+                    emptyDiv.style.display = 'block';
+                    document.getElementById('pending-count').textContent = '0';
+                    return;
+                }
+                
+                emptyDiv.style.display = 'none';
+                queueDiv.style.display = 'grid';
+                document.getElementById('pending-count').textContent = data.emails.length;
+                
+                queueDiv.innerHTML = data.emails.map(email => `
+                    <div class="email-item">
+                        <div class="email-header">
+                            <div>
+                                <div class="email-from">${email.sender}</div>
+                                <div class="email-subject">${email.subject}</div>
+                            </div>
+                            <div class="urgency-badge">HIGH PRIORITY</div>
+                        </div>
+                        <div class="email-preview">${email.body.substring(0, 150)}...</div>
+                        <div class="email-actions">
+                            <button class="btn btn-resolve" onclick="resolveEmail('${email.message_id}')">✓ Mark Resolved</button>
+                            <button class="btn btn-later" onclick="defer('${email.message_id}')">Later</button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Error loading queue:', e);
+            }
+        }
+        
+        async function resolveEmail(msgId) {
+            await fetch(`/api/email/${msgId}/resolve`, {method: 'POST'});
+            loadQueue();
+        }
+        
+        async function defer(msgId) {
+            console.log('Deferred:', msgId);
+        }
+        
+        loadQueue();
+        setInterval(loadQueue, 10000);
+    </script>
+</body>
+</html>
