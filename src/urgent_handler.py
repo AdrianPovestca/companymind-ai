@@ -1,6 +1,3 @@
-"""
-Handle urgent emails - send preliminary reply before human review
-"""
 import sys
 sys.path.insert(0, '/workspaces/companymind-ai')
 
@@ -32,7 +29,17 @@ def handle_urgent_emails():
     gmail = GmailEmailConnector(credentials_path="gmail_oauth_credentials.json")
     sent_count = 0
     
+    # SEND NOTIFICATION FOR EACH URGENT EMAIL
+    from src.notifications import send_notification
+    
     for msg_id, subject, sender in emails:
+        # Send notification FIRST
+        send_notification(
+            'adrianpovestcagc@gmail.com',
+            f'🚨 URGENT: {subject}',
+            f'From: {sender}\n\nHigh-priority email needs immediate attention!'
+        )
+        
         urgent_reply = """Thank you for contacting us about this urgent matter.
 
 We understand this requires immediate attention and have escalated your case to our team. 
@@ -50,7 +57,6 @@ Email Agent
             if sent_id:
                 print(f"   ✅ Preliminary reply sent (ID: {sent_id})")
                 
-                # Mark as preliminary response sent
                 conn = get_connection()
                 cursor = conn.cursor()
                 cursor.execute("""

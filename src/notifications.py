@@ -1,7 +1,6 @@
 import sys
 sys.path.insert(0, '/workspaces/companymind-ai')
 
-from src.email_database import get_connection
 from src.gmail_email_connector import GmailEmailConnector
 
 def send_notification(to_email, subject, message):
@@ -9,17 +8,31 @@ def send_notification(to_email, subject, message):
     try:
         gmail = GmailEmailConnector(credentials_path="gmail_oauth_credentials.json")
         
-        body = f"""
-{message}
+        body = f"""{message}
 
 ---
 PLATREMO.HUB Email Agent
-Automated notification
+Automated Alert
         """
         
-        gmail.send_reply("", body)  # This needs fixing - use direct send
-        print(f"✅ Notification sent to {to_email}")
+        # Use Gmail API to send email
+        service = gmail.service
+        
+        from email.mime.text import MIMEText
+        import base64
+        
+        msg = MIMEText(body)
+        msg['to'] = to_email
+        msg['from'] = 'adrianpovestcagc@gmail.com'
+        msg['subject'] = subject
+        
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        send_message = {'raw': raw}
+        
+        service.users().messages().send(userId='me', body=send_message).execute()
+        print(f"📬 Notification sent to {to_email}: {subject}")
         return True
+        
     except Exception as e:
         print(f"❌ Notification failed: {e}")
         return False
@@ -27,32 +40,31 @@ Automated notification
 def check_and_notify():
     """Check for urgent emails and notify"""
     try:
+        from src.email_database import get_connection
         conn = get_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT COUNT(*), subject FROM emails 
+            SELECT COUNT(*) FROM emails 
             WHERE decision_urgency = 'high' 
             AND decision_action = 'human_review'
             AND status = 'processed'
-            GROUP BY subject
-            LIMIT 1
         """)
-        result = cursor.fetchone()
+        count = cursor.fetchone()[0]
         conn.close()
         
-        if result and result[0] > 0:
+        if count > 0:
             send_notification(
                 'adrianpovestcagc@gmail.com',
-                '🚨 URGENT: Email(s) need review',
-                f'{result[0]} high-priority email(s) waiting: {result[1]}'
+                f'🚨 {count} Urgent Email(s) Waiting',
+                f'{count} high-priority email(s) need human review in the queue.'
             )
-            return True
+            return count
         
-        return False
+        return 0
     except Exception as e:
         print(f"❌ Check failed: {e}")
-        return False
+        return 0
 
 if __name__ == '__main__':
     check_and_notify()
