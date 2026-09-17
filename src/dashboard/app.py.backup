@@ -165,3 +165,42 @@ def review_dashboard():
     """Human review queue page"""
     return render_template('review.html')
 
+@app.route('/api/human-review-queue')
+def human_review_queue():
+    """Get emails waiting for human review"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT message_id, sender, subject, body 
+            FROM emails 
+            WHERE decision_action = 'human_review' 
+            AND decision_urgency = 'high'
+            AND status = 'processed'
+            ORDER BY created_at DESC
+            LIMIT 10
+        """)
+        emails = cursor.fetchall()
+        conn.close()
+        return jsonify({'emails': [{'message_id': e[0], 'sender': e[1], 'subject': e[2], 'body': e[3]} for e in emails]})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/email/<msg_id>/resolve', methods=['POST'])
+def resolve_email(msg_id):
+    """Mark email as resolved"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE emails SET status = 'human_resolved' WHERE message_id = ?", (msg_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/review')
+def review_dashboard():
+    """Human review queue"""
+    return render_template('review.html')
+
