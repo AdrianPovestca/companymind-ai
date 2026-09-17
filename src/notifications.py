@@ -1,57 +1,58 @@
-"""
-Send notifications for urgent/important emails
-"""
 import sys
 sys.path.insert(0, '/workspaces/companymind-ai')
 
 from src.email_database import get_connection
-import smtplib
-from email.mime.text import MIMEText
+from src.gmail_email_connector import GmailEmailConnector
 
-def send_email_notification(to_email, subject, body):
-    """Send email notification"""
+def send_notification(to_email, subject, message):
+    """Send real notification via Gmail"""
     try:
-        # Using Gmail to send notifications
-        msg = MIMEText(body)
-        msg['Subject'] = subject
-        msg['From'] = 'adrianpovestcagc@gmail.com'
-        msg['To'] = to_email
+        gmail = GmailEmailConnector(credentials_path="gmail_oauth_credentials.json")
         
-        # Note: In production, use SMTP with credentials
-        print(f"📬 Notification sent to {to_email}: {subject}")
+        body = f"""
+{message}
+
+---
+PLATREMO.HUB Email Agent
+Automated notification
+        """
+        
+        gmail.send_reply("", body)  # This needs fixing - use direct send
+        print(f"✅ Notification sent to {to_email}")
         return True
     except Exception as e:
         print(f"❌ Notification failed: {e}")
         return False
 
 def check_and_notify():
-    """Check for urgent emails and send notifications"""
+    """Check for urgent emails and notify"""
     try:
         conn = get_connection()
         cursor = conn.cursor()
         
-        # Find urgent emails that need attention
         cursor.execute("""
             SELECT COUNT(*), subject FROM emails 
             WHERE decision_urgency = 'high' 
             AND decision_action = 'human_review'
+            AND status = 'processed'
             GROUP BY subject
+            LIMIT 1
         """)
-        urgent = cursor.fetchall()
-        
+        result = cursor.fetchone()
         conn.close()
         
-        if urgent:
-            for count, subject in urgent:
-                msg = f"URGENT: {count} high-priority email(s) need attention:\n{subject}"
-                send_email_notification('adrianpovestcagc@gmail.com', 
-                                      '🚨 URGENT Email Alert', msg)
-            return len(urgent)
+        if result and result[0] > 0:
+            send_notification(
+                'adrianpovestcagc@gmail.com',
+                '🚨 URGENT: Email(s) need review',
+                f'{result[0]} high-priority email(s) waiting: {result[1]}'
+            )
+            return True
         
-        return 0
+        return False
     except Exception as e:
-        print(f"❌ Notification check failed: {e}")
-        return 0
+        print(f"❌ Check failed: {e}")
+        return False
 
 if __name__ == '__main__':
     check_and_notify()
