@@ -1,111 +1,73 @@
-"""
-Send Gmail replies for auto-approved emails
-"""
+"""Send Gmail replies for emails approved for automatic reply."""
+import os
 import sys
-sys.path.insert(0, '/workspaces/companymind-ai')
 
-from src.email_database import get_connection
+from src.email_database import get_connection, init_email_db
 from src.gmail_email_connector import GmailEmailConnector
 
-def get_emails_to_reply():
-    """Get emails marked for auto_reply but not yet sent"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT message_id, thread_id, subject, sender, body FROM emails 
-            WHERE decision_action = 'auto_reply' AND status = 'processed'
-            LIMIT 5
-        """)
-        emails = cursor.fetchall()
-        conn.close()
-        return [{'message_id': e[0], 'thread_id': e[1], 'subject': e[2], 'sender': e[3], 'body': e[4]} for e in emails]
-    except Exception as e:
-        print(f"❌ DB error: {e}")
-        return []
 
-def get_reply_text(message_id):
-    """Get the generated reply text from DB"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT decision_reason FROM emails WHERE message_id = ?
-        """, (message_id,))
-        result = cursor.fetchone()
-        conn.close()
-        if result:
-            return result[0]
-        return None
-    except Exception as e:
-        print(f"❌ DB error: {e}")
-        return None
+def get_emails_to_reply():
+    init_email_db()
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT message_id, thread_id, subject, sender, body
+        FROM emails
+        WHERE decision_action = 'auto_reply' AND status = 'processed'
+          AND message_type = 'email'
+        LIMIT 5
+        """
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
 
 def mark_as_sent(message_id):
-    """Mark email as sent in database"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE emails 
-            SET status = 'sent', decision_action = 'auto_reply_sent'
-            WHERE message_id = ?
-        """, (message_id,))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"❌ DB update error: {e}")
-        return False
+    conn = get_connection()
+    conn.execute(
+        """
+        UPDATE emails
+        SET status = 'sent', decision_action = 'auto_reply_sent'
+        WHERE message_id = ?
+        """,
+        (message_id,),
+    )
+    conn.commit()
+    conn.close()
+
 
 def send_replies():
-    """Main function - send pending replies"""
-    print("\n" + "="*70)
-    print("GMAIL REPLY SENDER")
-    print("="*70 + "\n")
-    
-    try:
-        gmail = GmailEmailConnector(credentials_path="gmail_oauth_credentials.json")
-    except Exception as e:
-        print(f"❌ Gmail connection error: {e}")
-        return
-    
+    """Send replies without making a failed Gmail connection crash the pipeline."""
+    init_email_db()
     emails_to_reply = get_emails_to_reply()
-    print(f"Found {len(emails_to_reply)} emails to reply to\n")
-    
-    sent_count = 0
-    error_count = 0
-    
-    for email in emails_to_reply:
-        print(f"📧 Replying to: {email['sender']}")
-        print(f"   Subject: {email['subject'][:50]}")
-        
-        # In real implementation, get reply text from smart_email_agent
-        # For now, use a generic reply
-        reply_text = "Thank you for your inquiry. We will get back to you shortly."
-        
-        try:
-            # Send reply via Gmail API
-            sent_id = gmail.send_reply(email['message_id'], reply_text)
-            
-            if sent_id:
-                print(f"   ✅ Sent (ID: {sent_id})")
-                mark_as_sent(email['message_id'])
-                sent_count += 1
-            else:
-                print(f"   ❌ Failed to send")
-                error_count += 1
-        except Exception as e:
-            print(f"   ❌ Error: {str(e)[:60]}")
-            error_count += 1
-        
-        print()
-    
-    print("="*70)
-    print(f"✅ Processing complete!")
-    print(f"   Sent: {sent_count}")
-    print(f"   Errors: {error_count}")
-    print("="*70)
+    if not emails_to_reply:
+        print("No automatic replies pending.")
+        return 0
 
-if __name__ == '__main__':
-    send_replies()
+    credentials_path = os.environ.get("GMAIL_CREDENTIALS_PATH", "gmail_oauth_credentials.json")
+    try:
+        gmail = GmailEmailConnector(credentials_path=credentials_path)
+    except Exception as exc:
+        print(f"Gmail reply sender skipped: {exc}", file=sys.stderr)
+        return 0
+
+    sent_count = 0
+    for email in emails_to_reply:
+        reply_text = "Thank you for your inquiry. We will get back to you shortly."
+        try:
+            sent_id = gmail.send_reply(email["message_id"], reply_text)
+            if sent_id:
+                mark_as_sent(email["message_id"])
+                sent_count += 1
+                print(f"Reply sent to {email['sender']}: {sent_id}")
+            else:
+                print(f"Reply was not sent for {email['message_id']}", file=sys.stderr)
+        except Exception as exc:
+            print(f"Reply error for {email['message_id']}: {exc}", file=sys.stderr)
+
+    print(f"Automatic replies sent: {sent_count}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(send_replies())
