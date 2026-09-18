@@ -6,186 +6,147 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template
 from flask_cors import CORS
 
-from src.email_database import get_connection, init_email_db
-
+from src.email_database import get_connection
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+APP_ROOT = Path(__file__).resolve().parent
 
-app = Flask(
-    __name__,
-    template_folder=str(TEMPLATES_DIR),
-    static_folder=str(BASE_DIR / "src" / "static"),
-    static_url_path="/static",
-)
+app = Flask(__name__)
+app.template_folder = str(APP_ROOT / "templates")
+app.static_folder = str(BASE_DIR / "src" / "static")
+app.static_url_path = "/static"
 CORS(app)
 
-# Create the SQLite schema when the Render web process starts. The database is
-# still ephemeral on Render's free filesystem, so use a managed database for
-# production persistence if required.
-try:
-    init_email_db()
-except Exception as exc:
-    app.logger.warning("Database initialization failed: %s", exc)
+GMAIL_CREDENTIALS_PATH = BASE_DIR / "gmail_oauth_credentials.json"
+SMART_AGENT_PATH = BASE_DIR / "src" / "smart_email_agent.py"
+REPLY_SENDER_PATH = BASE_DIR / "src" / "gmail_reply_sender.py"
 
 
-def _close_connection(conn):
-    if conn is not None:
-        conn.close()
-
-
-@app.get("/")
+@app.route("/")
 def home():
     return render_template("index.html")
 
 
-@app.get("/dashboard")
-def dashboard():
+@app.route("/dashboard")
+def index():
     return render_template("index.html")
 
 
-@app.get("/intro")
+@app.route("/intro")
 def intro():
-    template = TEMPLATES_DIR / "intro.html"
-    if template.exists():
-        return render_template("intro.html")
-    return render_template("index.html")
+    return render_template("intro.html")
 
 
-@app.get("/review")
+@app.route("/review")
 def review_dashboard():
-    template = TEMPLATES_DIR / "review.html"
-    if template.exists():
-        return render_template("review.html")
-    return render_template("index.html")
+    return render_template("review.html")
 
 
-@app.get("/health")
-def health():
-    return jsonify({"status": "ok"})
-
-
-@app.get("/api/stats")
+@app.route("/api/stats", methods=["GET"])
 def get_stats():
-    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        auto_replied = cursor.execute(
-            "SELECT COUNT(*) FROM emails WHERE decision_action = ?",
-            ("auto_reply",),
-        ).fetchone()[0]
-        pending = cursor.execute(
-            """SELECT COUNT(*) FROM emails
-               WHERE decision_action IN ('human_review', 'escalate')"""
-        ).fetchone()[0]
-        total = cursor.execute("SELECT COUNT(*) FROM emails").fetchone()[0]
-        return jsonify(
-            {"auto_replied": auto_replied, "pending": pending, "total": total}
-        )
+        cursor.execute("SELECT COUNT(*) FROM emails WHERE decision_action = 'auto_reply'")
+        auto = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM emails WHERE decision_action IN ('human_review', 'escalate')")
+        pending = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM emails")
+        total = cursor.fetchone()[0]
+        conn.close()
+        return jsonify({"auto_replied": auto, "pending": pending, "total": total})
     except Exception as exc:
-        app.logger.exception("Could not read dashboard statistics")
+        app.logger.exception("DB stats failed")
         return jsonify({"error": str(exc)}), 500
-    finally:
-        _close_connection(conn)
 
 
-@app.get("/api/pending-emails")
+@app.route("/api/pending-emails", methods=["GET"])
 def get_pending():
-    conn = None
     try:
         conn = get_connection()
-        rows = conn.execute(
-            """SELECT message_id, subject, sender, body
-               FROM emails
-               WHERE decision_action IN ('human_review', 'escalate')
-               ORDER BY created_at DESC
-               LIMIT 50"""
-        ).fetchall()
-        return jsonify(
-            [
-                {
-                    "id": row[0],
-                    "message_id": row[0],
-                    "subject": row[1],
-                    "sender": row[2],
-                    "body": row[3],
-                }
-                for row in rows
-            ]
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, subject, sender, body FROM emails WHERE decision_action IN ('human_review', 'escalate') LIMIT 50"
         )
-    except Exception as exc:
-        app.logger.exception("Could not read pending emails")
-        return jsonify({"error": str(exc)}), 500
-    finally:
-        _close_connection(conn)
+        emails = cursor.fetchall()
+        conn.close()
+        return jsonify(
+            [{"id": e[0], "subject": e[1], "sender": e[2], "body": e[3]} for e in emails]
+        )
+    except Exception:
+        return jsonify([]), 500
 
 
-@app.get("/api/human-review-queue")
-def human_review_queue():
-    conn = None
+@app.route("/api/email/<email_id>", methods=["GET"])
+def get_email(email_id):
     try:
         conn = get_connection()
-        rows = conn.execute(
-            """SELECT message_id, sender, subject, body
-               FROM emails
-               WHERE decision_action = 'human_review'
-               AND human_review_status = 'pending'
-               ORDER BY created_at DESC
-               LIMIT 50"""
-        ).fetchall()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, subject, sender, body, created_at FROM emails WHERE id = ?",
+            (email_id,),
+        )
+        e = cursor.fetchone()
+        conn.close()
+        if not e:
+            return jsonify({}), 404
+        return jsonify(
+            {"id": e[0], "subject": e[1], "sender": e[2], "body": e[3], "created_at": e[4]}
+        )
+    except Exception:
+        return jsonify({}), 500
+
+
+@app.route("/api/email/<email_id>/approve", methods=["POST"])
+def approve(email_id):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE emails SET decision_action = 'approved' WHERE id = ?", (email_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+    except Exception:
+        return jsonify({"ok": False}), 500
+
+
+@app.route("/api/email/<email_id>/reject", methods=["POST"])
+def reject(email_id):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE emails SET decision_action = 'escalate' WHERE id = ?", (email_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+    except Exception:
+        return jsonify({"ok": False}), 500
+
+
+@app.route("/api/process-emails", methods=["POST"])
+def process_emails():
+    """Run Gmail processing only when credentials are configured."""
+    if not GMAIL_CREDENTIALS_PATH.exists():
         return jsonify(
             {
-                "emails": [
-                    {
-                        "message_id": row[0],
-                        "sender": row[1],
-                        "subject": row[2],
-                        "body": row[3],
-                    }
-                    for row in rows
-                ]
+                "ok": False,
+                "skipped": True,
+                "message": (
+                    "Gmail OAuth credentials are not configured yet. "
+                    "Add gmail_oauth_credentials.json or set the required env vars "
+                    "before enabling email automation."
+                ),
             }
-        )
-    except Exception as exc:
-        app.logger.exception("Could not read human review queue")
-        return jsonify({"error": str(exc)}), 500
-    finally:
-        _close_connection(conn)
+        ), 200
 
-
-@app.post("/api/email/<message_id>/resolve")
-def resolve_email(message_id):
-    conn = None
-    try:
-        conn = get_connection()
-        cursor = conn.execute(
-            """UPDATE emails
-               SET status = 'human_resolved', human_review_status = 'resolved'
-               WHERE message_id = ?""",
-            (message_id,),
-        )
-        conn.commit()
-        if cursor.rowcount == 0:
-            return jsonify({"error": "Email not found"}), 404
-        return jsonify({"success": True})
-    except Exception as exc:
-        app.logger.exception("Could not resolve email")
-        return jsonify({"error": str(exc)}), 500
-    finally:
-        _close_connection(conn)
-
-
-@app.post("/api/process-emails")
-def process_emails():
-    """Run the existing email processing scripts from the repository root."""
     try:
         commands = [
-            [sys.executable, "src/smart_email_agent.py"],
-            [sys.executable, "src/gmail_reply_sender.py"],
+            [sys.executable, str(SMART_AGENT_PATH)],
+            [sys.executable, str(REPLY_SENDER_PATH)],
         ]
+
         for command in commands:
-            result = subprocess.run(
+            subprocess.run(
                 command,
                 cwd=str(BASE_DIR),
                 capture_output=True,
@@ -193,18 +154,72 @@ def process_emails():
                 timeout=30,
                 check=False,
             )
-            if result.returncode != 0:
-                app.logger.error("Command failed: %s\n%s", command, result.stderr)
-                return jsonify({"ok": False, "error": result.stderr}), 500
-        return jsonify({"ok": True, "message": "Email processing complete"})
+
+        return jsonify({"ok": True, "message": "Email processing started"})
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": False, "error": "Processing timed out after 30 seconds."}), 504
     except Exception as exc:
-        app.logger.exception("Email processing failed")
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
+@app.route("/api/human-review-queue")
+def human_review_queue():
+    """Get emails waiting for human review."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT message_id, sender, subject, body
+            FROM emails
+            WHERE decision_action = 'human_review'
+            AND decision_urgency = 'high'
+            AND status = 'processed'
+            ORDER BY created_at DESC
+            LIMIT 10
+            """
+        )
+        emails = cursor.fetchall()
+        conn.close()
+
+        return jsonify(
+            {
+                "emails": [
+                    {
+                        "message_id": e[0],
+                        "sender": e[1],
+                        "subject": e[2],
+                        "body": e[3],
+                    }
+                    for e in emails
+                ]
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/email/<msg_id>/resolve", methods=["POST"])
+def resolve_email(msg_id):
+    """Mark email as resolved by human."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE emails
+            SET status = 'human_resolved', human_review_status = 'resolved'
+            WHERE message_id = ?
+            """,
+            (msg_id,),
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", "5000")),
-        debug=False,
-    )
+    print("✅ Dashboard running on http://0.0.0.0:5000")
+    app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
