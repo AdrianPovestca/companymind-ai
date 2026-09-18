@@ -5,6 +5,10 @@ import sys
 sys.path.insert(0, '/workspaces/companymind-ai')
 from src.email_database import get_connection
 
+@app.route('/')
+def home():
+    return render_template('intro.html')
+
 app = Flask(__name__)
 app.template_folder = str(Path(__file__).resolve().parent / 'templates')
 app.static_folder = str(Path(__file__).resolve().parent.parent / 'static')
