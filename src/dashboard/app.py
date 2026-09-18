@@ -8,7 +8,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template
 from flask_cors import CORS
 
-from src.email_database import get_connection
+from src.email_database import get_connection, init_email_db
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 APP_ROOT = Path(__file__).resolve().parent
@@ -18,8 +18,13 @@ app.static_folder = str(BASE_DIR / "src" / "static")
 app.static_url_path = "/static"
 CORS(app)
 
-GMAIL_CREDENTIALS_PATH = BASE_DIR / "gmail_oauth_credentials.json"
+# Render does not provide a local credential file unless it is mounted as a secret.
+GMAIL_CREDENTIALS_PATH = Path(os.environ.get("GMAIL_CREDENTIALS_PATH", str(BASE_DIR / "gmail_oauth_credentials.json")))
 PYTHON = sys.executable
+
+# Create/upgrade the SQLite schema before the first request. A new Render disk
+# starts empty, so querying emails before this call causes "no such table".
+init_email_db()
 
 _agent_lock = threading.Lock()
 _agent_stop = threading.Event()
@@ -28,43 +33,65 @@ _agent_processes = []
 _agent_state = {"running": False, "status": "Oprit", "last_error": None, "last_run": None}
 
 
+def _run_command(command):
+    """Run a pipeline step without blocking the web worker on its output."""
+    process = None
+    try:
+        with _agent_lock:
+            process = subprocess.Popen(
+                command,
+                cwd=str(BASE_DIR),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            _agent_processes.append(process)
+        # OAuth or a broken external service must not leave the agent hanging forever.
+        while process.poll() is None:
+            if _agent_stop.wait(1):
+                process.terminate()
+                break
+        try:
+            return process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return -1
+    finally:
+        with _agent_lock:
+            if process in _agent_processes:
+                _agent_processes.remove(process)
+
+
 def _pipeline():
-    """Run the complete pipeline until Stop is pressed."""
+    """Run one pipeline round and repeat every five minutes."""
     global _agent_processes
     commands = [
+        # This command fetches unread Gmail messages and stores them locally.
         [PYTHON, "-m", "src.gmail_email_connector"],
         [PYTHON, "src/smart_email_agent.py"],
         [PYTHON, "-m", "src.notifications"],
         [PYTHON, "src/urgent_handler.py"],
         [PYTHON, "src/gmail_reply_sender.py"],
     ]
-    while not _agent_stop.is_set():
-        try:
+    try:
+        while not _agent_stop.is_set():
             for command in commands:
                 if _agent_stop.is_set():
                     break
-                with _agent_lock:
-                    process = subprocess.Popen(
-                        command, cwd=str(BASE_DIR), stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT, text=True,
-                    )
-                    _agent_processes.append(process)
-                process.wait()
-                with _agent_lock:
-                    if process in _agent_processes:
-                        _agent_processes.remove(process)
-                if process.returncode not in (0, None) and not _agent_stop.is_set():
-                    _agent_state["last_error"] = f"Procesul {' '.join(command[1:])} a eșuat ({process.returncode})"
+                result = _run_command(command)
+                if result not in (0, None) and not _agent_stop.is_set():
+                    _agent_state["last_error"] = f"Pasul {' '.join(command[1:])} s-a încheiat cu codul {result}. Verifică tokenul Gmail din Render."
             _agent_state["last_run"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            _agent_state["status"] = "Pornit · verific din nou în 5 minute" if not _agent_stop.is_set() else "Oprit"
-            _agent_stop.wait(300)
-        except Exception as exc:
-            _agent_state["last_error"] = str(exc)
-            _agent_state["status"] = "Eroare"
-            break
-    _agent_state["running"] = False
-    if _agent_state["status"] != "Eroare":
-        _agent_state["status"] = "Oprit"
+            if not _agent_stop.is_set():
+                _agent_state["status"] = "Pornit · următoarea verificare în 5 minute"
+                _agent_stop.wait(300)
+    except Exception as exc:
+        _agent_state["last_error"] = str(exc)
+        _agent_state["status"] = "Eroare"
+    finally:
+        _agent_state["running"] = False
+        if _agent_state["status"] != "Eroare":
+            _agent_state["status"] = "Oprit"
 
 
 def _start_agent():
@@ -73,7 +100,7 @@ def _start_agent():
         if _agent_thread and _agent_thread.is_alive():
             return False
         _agent_stop.clear()
-        _agent_state.update({"running": True, "status": "Pornez agentul…", "last_error": None})
+        _agent_state.update({"running": True, "status": "Pornit · rulează prima verificare", "last_error": None})
         _agent_thread = threading.Thread(target=_pipeline, daemon=True, name="email-agent")
         _agent_thread.start()
     return True
@@ -86,7 +113,7 @@ def _stop_agent():
     for process in processes:
         if process.poll() is None:
             process.terminate()
-    return True
+    _agent_state.update({"running": False, "status": "Oprit"})
 
 
 @app.route("/")
@@ -116,8 +143,8 @@ def agent_status():
 
 @app.route("/api/agent/start", methods=["POST"])
 def start_agent():
-    if not GMAIL_CREDENTIALS_PATH.exists():
-        return jsonify({"ok": False, "error": "Lipsește gmail_oauth_credentials.json."}), 400
+    if not GMAIL_CREDENTIALS_PATH.exists() and not Path("gmail_token.json").exists():
+        return jsonify({"ok": False, "error": "Configurează GMAIL_CREDENTIALS_PATH și gmail_token.json ca Render Secret File, apoi redeploy."}), 400
     return jsonify({"ok": _start_agent(), **_agent_state})
 
 
@@ -130,13 +157,13 @@ def stop_agent():
 @app.route("/api/stats")
 def get_stats():
     try:
+        init_email_db()
         conn = get_connection()
         row = conn.execute("""
-            SELECT
-              COUNT(*) AS total,
-              SUM(CASE WHEN decision_action IN ('auto_reply', 'auto_reply_sent') THEN 1 ELSE 0 END) AS auto_replied,
-              SUM(CASE WHEN decision_action IN ('human_review', 'escalate', 'urgent_preliminary_reply') THEN 1 ELSE 0 END) AS pending,
-              SUM(CASE WHEN decision_urgency = 'high' AND human_review_status = 'pending' THEN 1 ELSE 0 END) AS urgent
+            SELECT COUNT(*) AS total,
+              SUM(CASE WHEN decision_action IN ('auto_reply', 'auto_reply_sent') THEN 1 ELSE 0 END),
+              SUM(CASE WHEN decision_action IN ('human_review', 'escalate', 'urgent_preliminary_reply') THEN 1 ELSE 0 END),
+              SUM(CASE WHEN decision_urgency = 'high' AND human_review_status = 'pending' THEN 1 ELSE 0 END)
             FROM emails WHERE message_type = 'email'
         """).fetchone()
         conn.close()
@@ -148,21 +175,20 @@ def get_stats():
 
 @app.route("/api/pending-emails")
 def get_pending():
-    try:
-        conn = get_connection()
-        rows = conn.execute("""
-            SELECT message_id, subject, sender, body FROM emails
-            WHERE decision_action IN ('human_review', 'escalate', 'urgent_preliminary_reply')
-            ORDER BY created_at DESC LIMIT 50
-        """).fetchall()
-        conn.close()
-        return jsonify([dict(row) for row in rows])
-    except Exception:
-        return jsonify([]), 500
+    init_email_db()
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT message_id, subject, sender, body FROM emails
+        WHERE decision_action IN ('human_review', 'escalate', 'urgent_preliminary_reply')
+        ORDER BY created_at DESC LIMIT 50
+    """).fetchall()
+    conn.close()
+    return jsonify([dict(row) for row in rows])
 
 
 @app.route("/api/email/<email_id>")
 def get_email(email_id):
+    init_email_db()
     conn = get_connection()
     row = conn.execute("SELECT message_id, subject, sender, body, created_at FROM emails WHERE message_id = ?", (email_id,)).fetchone()
     conn.close()
@@ -189,11 +215,7 @@ def reject(email_id):
 
 @app.route("/api/process-emails", methods=["POST"])
 def process_emails():
-    """Backward-compatible alias for Start."""
-    if not GMAIL_CREDENTIALS_PATH.exists():
-        return jsonify({"ok": False, "error": "Lipsește gmail_oauth_credentials.json."}), 400
-    _start_agent()
-    return jsonify({"ok": True, "message": "Agentul este pornit", **_agent_state})
+    return start_agent()
 
 
 if __name__ == "__main__":
