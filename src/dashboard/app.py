@@ -30,7 +30,7 @@ _agent_lock = threading.Lock()
 _agent_stop = threading.Event()
 _agent_thread = None
 _agent_processes = []
-_agent_state = {"running": False, "status": "Oprit", "last_error": None, "last_run": None}
+_agent_state = {"running": False, "status": "Stopped", "last_error": None, "last_run": None}
 
 
 def _run_command(command):
@@ -64,9 +64,7 @@ def _run_command(command):
 
 def _pipeline():
     """Run one pipeline round and repeat every five minutes."""
-    global _agent_processes
     commands = [
-        # This command fetches unread Gmail messages and stores them locally.
         [PYTHON, "-m", "src.gmail_email_connector"],
         [PYTHON, "src/smart_email_agent.py"],
         [PYTHON, "-m", "src.notifications"],
@@ -80,18 +78,18 @@ def _pipeline():
                     break
                 result = _run_command(command)
                 if result not in (0, None) and not _agent_stop.is_set():
-                    _agent_state["last_error"] = f"Pasul {' '.join(command[1:])} s-a încheiat cu codul {result}. Verifică tokenul Gmail din Render."
+                    _agent_state["last_error"] = f"Step {' '.join(command[1:])} exited with code {result}. Check the Gmail token in Render."
             _agent_state["last_run"] = time.strftime("%Y-%m-%d %H:%M:%S")
             if not _agent_stop.is_set():
-                _agent_state["status"] = "Pornit · următoarea verificare în 5 minute"
+                _agent_state["status"] = "Running · next check in 5 minutes"
                 _agent_stop.wait(300)
     except Exception as exc:
         _agent_state["last_error"] = str(exc)
-        _agent_state["status"] = "Eroare"
+        _agent_state["status"] = "Error"
     finally:
         _agent_state["running"] = False
-        if _agent_state["status"] != "Eroare":
-            _agent_state["status"] = "Oprit"
+        if _agent_state["status"] != "Error":
+            _agent_state["status"] = "Stopped"
 
 
 def _start_agent():
@@ -100,7 +98,7 @@ def _start_agent():
         if _agent_thread and _agent_thread.is_alive():
             return False
         _agent_stop.clear()
-        _agent_state.update({"running": True, "status": "Pornit · rulează prima verificare", "last_error": None})
+        _agent_state.update({"running": True, "status": "Starting agent…", "last_error": None})
         _agent_thread = threading.Thread(target=_pipeline, daemon=True, name="email-agent")
         _agent_thread.start()
     return True
@@ -113,7 +111,7 @@ def _stop_agent():
     for process in processes:
         if process.poll() is None:
             process.terminate()
-    _agent_state.update({"running": False, "status": "Oprit"})
+    _agent_state.update({"running": False, "status": "Stopped"})
 
 
 @app.route("/")
@@ -144,7 +142,7 @@ def agent_status():
 @app.route("/api/agent/start", methods=["POST"])
 def start_agent():
     if not GMAIL_CREDENTIALS_PATH.exists() and not Path("gmail_token.json").exists():
-        return jsonify({"ok": False, "error": "Configurează GMAIL_CREDENTIALS_PATH și gmail_token.json ca Render Secret File, apoi redeploy."}), 400
+        return jsonify({"ok": False, "error": "Configure GMAIL_CREDENTIALS_PATH and gmail_token.json as Render Secret Files, then redeploy."}), 400
     return jsonify({"ok": _start_agent(), **_agent_state})
 
 
