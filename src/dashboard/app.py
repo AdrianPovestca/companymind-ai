@@ -13,10 +13,10 @@ CORS(app)
 
 @app.route('/')
 def home():
-    return render_template('intro.html')
+    return render_template('index.html')
 
 @app.route('/dashboard')
-def index():
+def dashboard():
     return render_template('index.html')
 
 @app.route('/review')
@@ -28,7 +28,7 @@ def get_stats():
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM emails WHERE status = 'pending' AND decision_urgency = 'high'")
+        cursor.execute("SELECT COUNT(*) FROM emails WHERE decision_urgency = 'high'")
         pending = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM emails WHERE status = 'sent_reply_sent'")
         auto_replied = cursor.fetchone()[0]
