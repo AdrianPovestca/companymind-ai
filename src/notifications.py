@@ -1,28 +1,36 @@
-"""Send one notification for each new urgent email awaiting review."""
+"""Send urgent email notifications via Telegram."""
 import os
-from email.mime.text import MIMEText
-import base64
-
+import requests
 from src.email_database import get_connection
-from src.gmail_email_connector import GmailEmailConnector
 
 
-def send_notification(to_email, subject, message):
+def send_telegram_notification(title, message):
+    """Send notification via Telegram Bot."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    
+    if not token or not chat_id:
+        print("❌ Telegram credentials not set")
+        return False
+    
     try:
-        gmail = GmailEmailConnector(credentials_path="gmail_oauth_credentials.json")
-        msg = MIMEText(f"{message}\n\n---\nPLATREMO.HUB Email Agent")
-        msg["to"] = to_email
-        msg["from"] = os.environ.get("ALERT_EMAIL", "adrianpovestcagc@gmail.com")
-        msg["subject"] = subject
-        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-        gmail.service.users().messages().send(userId="me", body={"raw": raw}).execute()
-        return True
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        text = f"<b>{title}</b>\n\n{message}"
+        
+        response = requests.post(url, json={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML"
+        })
+        
+        return response.status_code == 200
     except Exception as exc:
-        print(f"❌ Notification failed: {exc}")
+        print(f"❌ Telegram notification failed: {exc}")
         return False
 
 
 def check_and_notify():
+    """Check for urgent emails and send Telegram notifications."""
     conn = get_connection()
     rows = conn.execute("""
         SELECT message_id, sender, subject FROM emails
@@ -31,14 +39,22 @@ def check_and_notify():
         ORDER BY created_at DESC LIMIT 20
     """).fetchall()
     conn.close()
+    
     sent = 0
-    destination = os.environ.get("ALERT_EMAIL", "adrianpovestcagc@gmail.com")
     for message_id, sender, subject in rows:
-        if send_notification(destination, f"🚨 URGENT: {subject}", f"From: {sender}\nHigh-priority email needs immediate attention."):
+        title = f"🚨 URGENT EMAIL"
+        message = f"<b>From:</b> {sender}\n<b>Subject:</b> {subject}\n\n<i>Needs immediate attention</i>"
+        
+        if send_telegram_notification(title, message):
             conn = get_connection()
-            conn.execute("UPDATE emails SET urgent_notified_at = CURRENT_TIMESTAMP WHERE message_id = ?", (message_id,))
-            conn.commit(); conn.close()
+            conn.execute(
+                "UPDATE emails SET urgent_notified_at = CURRENT_TIMESTAMP WHERE message_id = ?", 
+                (message_id,)
+            )
+            conn.commit()
+            conn.close()
             sent += 1
+    
     return sent
 
 
