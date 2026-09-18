@@ -18,12 +18,11 @@ app.static_folder = str(BASE_DIR / "src" / "static")
 app.static_url_path = "/static"
 CORS(app)
 
-# Render does not provide a local credential file unless it is mounted as a secret.
-GMAIL_CREDENTIALS_PATH = Path(os.environ.get("GMAIL_CREDENTIALS_PATH", str(BASE_DIR / "gmail_oauth_credentials.json")))
+# Configure these as Render Secret File paths or environment variables.
+GMAIL_CREDENTIALS_PATH = Path(os.environ.get("GMAIL_CREDENTIALS_PATH", str(BASE_DIR / "gmail_oauth_credentials.json"))).expanduser()
+GMAIL_TOKEN_PATH = Path(os.environ.get("GMAIL_TOKEN_PATH", str(BASE_DIR / "gmail_token.json"))).expanduser()
 PYTHON = sys.executable
 
-# Create/upgrade the SQLite schema before the first request. A new Render disk
-# starts empty, so querying emails before this call causes "no such table".
 init_email_db()
 
 _agent_lock = threading.Lock()
@@ -33,20 +32,24 @@ _agent_processes = []
 _agent_state = {"running": False, "status": "Stopped", "last_error": None, "last_run": None}
 
 
+def _auth_error():
+    missing = []
+    if not GMAIL_CREDENTIALS_PATH.is_file():
+        missing.append(f"credentials file: {GMAIL_CREDENTIALS_PATH}")
+    if not GMAIL_TOKEN_PATH.is_file():
+        missing.append(f"token file: {GMAIL_TOKEN_PATH}")
+    return "Gmail authentication files are missing or inaccessible: " + ", ".join(missing)
+
+
 def _run_command(command):
-    """Run a pipeline step without blocking the web worker on its output."""
     process = None
     try:
         with _agent_lock:
-            process = subprocess.Popen(
-                command,
-                cwd=str(BASE_DIR),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
+            process = subprocess.Popen(command, cwd=str(BASE_DIR), stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, start_new_session=True,
+                                       env={**os.environ, "GMAIL_CREDENTIALS_PATH": str(GMAIL_CREDENTIALS_PATH),
+                                            "GMAIL_TOKEN_PATH": str(GMAIL_TOKEN_PATH)})
             _agent_processes.append(process)
-        # OAuth or a broken external service must not leave the agent hanging forever.
         while process.poll() is None:
             if _agent_stop.wait(1):
                 process.terminate()
@@ -63,7 +66,6 @@ def _run_command(command):
 
 
 def _pipeline():
-    """Run one pipeline round and repeat every five minutes."""
     commands = [
         [PYTHON, "-m", "src.gmail_email_connector"],
         [PYTHON, "src/smart_email_agent.py"],
@@ -78,7 +80,7 @@ def _pipeline():
                     break
                 result = _run_command(command)
                 if result not in (0, None) and not _agent_stop.is_set():
-                    _agent_state["last_error"] = f"Step {' '.join(command[1:])} exited with code {result}. Check the Gmail token in Render."
+                    _agent_state["last_error"] = f"Step {' '.join(command[1:])} exited with code {result}. Check Gmail authentication."
             _agent_state["last_run"] = time.strftime("%Y-%m-%d %H:%M:%S")
             if not _agent_stop.is_set():
                 _agent_state["status"] = "Running · next check in 5 minutes"
@@ -136,13 +138,16 @@ def review_dashboard():
 
 @app.route("/api/agent/status")
 def agent_status():
-    return jsonify(_agent_state)
+    return jsonify({**_agent_state, "credentials_path": str(GMAIL_CREDENTIALS_PATH),
+                    "token_path": str(GMAIL_TOKEN_PATH),
+                    "credentials_available": GMAIL_CREDENTIALS_PATH.is_file(),
+                    "token_available": GMAIL_TOKEN_PATH.is_file()})
 
 
 @app.route("/api/agent/start", methods=["POST"])
 def start_agent():
-    if not GMAIL_CREDENTIALS_PATH.exists() and not Path("gmail_token.json").exists():
-        return jsonify({"ok": False, "error": "Configure GMAIL_CREDENTIALS_PATH and gmail_token.json as Render Secret Files, then redeploy."}), 400
+    if not GMAIL_CREDENTIALS_PATH.is_file() or not GMAIL_TOKEN_PATH.is_file():
+        return jsonify({"ok": False, "error": _auth_error(), **_agent_state}), 400
     return jsonify({"ok": _start_agent(), **_agent_state})
 
 
@@ -158,7 +163,7 @@ def get_stats():
         init_email_db()
         conn = get_connection()
         row = conn.execute("""
-            SELECT COUNT(*) AS total,
+            SELECT COUNT(*),
               SUM(CASE WHEN decision_action IN ('auto_reply', 'auto_reply_sent') THEN 1 ELSE 0 END),
               SUM(CASE WHEN decision_action IN ('human_review', 'escalate', 'urgent_preliminary_reply') THEN 1 ELSE 0 END),
               SUM(CASE WHEN decision_urgency = 'high' AND human_review_status = 'pending' THEN 1 ELSE 0 END)
@@ -175,11 +180,7 @@ def get_stats():
 def get_pending():
     init_email_db()
     conn = get_connection()
-    rows = conn.execute("""
-        SELECT message_id, subject, sender, body FROM emails
-        WHERE decision_action IN ('human_review', 'escalate', 'urgent_preliminary_reply')
-        ORDER BY created_at DESC LIMIT 50
-    """).fetchall()
+    rows = conn.execute("SELECT message_id, subject, sender, body FROM emails WHERE decision_action IN ('human_review', 'escalate', 'urgent_preliminary_reply') ORDER BY created_at DESC LIMIT 50").fetchall()
     conn.close()
     return jsonify([dict(row) for row in rows])
 
@@ -217,5 +218,4 @@ def process_emails():
 
 
 if __name__ == "__main__":
-    print("✅ Dashboard running on http://0.0.0.0:5000")
     app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
