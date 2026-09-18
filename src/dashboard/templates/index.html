@@ -1,98 +1,18 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="ro">
 <head>
-    <title>Email Agent Dashboard</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: linear-gradient(135deg, #0f1419 0%, #1a1f2e 100%); color: #e0e0e0; min-height: 100vh; }
-        .container { max-width: 1400px; margin: 0 auto; padding: 60px 20px; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 60px; }
-        h1 { font-size: 42px; font-weight: 700; color: #d4a574; }
-        .nav { display: flex; gap: 20px; }
-        .nav a { color: #d4a574; text-decoration: none; font-size: 14px; font-weight: 500; padding: 8px 16px; border-radius: 4px; transition: 0.2s; }
-        .nav a:hover { background: rgba(212, 165, 116, 0.1); }
-        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 30px; margin: 50px 0; }
-        .stat-card { background: linear-gradient(135deg, #1a2332 0%, #16213e 100%); padding: 40px; border-radius: 12px; border: 1px solid rgba(212, 165, 116, 0.2); transition: 0.3s; }
-        .stat-card:hover { transform: translateY(-5px); border-color: rgba(212, 165, 116, 0.5); box-shadow: 0 20px 40px rgba(212, 165, 116, 0.1); }
-        .stat-number { font-size: 56px; font-weight: 700; color: #d4a574; line-height: 1; margin-bottom: 15px; }
-        .stat-label { font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
-        .action-section { text-align: center; margin: 80px 0; }
-        .button { display: inline-block; padding: 18px 50px; background: linear-gradient(135deg, #d4a574 0%, #a67c52 100%); color: #0f1419; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 16px; cursor: pointer; border: none; transition: 0.3s; box-shadow: 0 10px 30px rgba(212, 165, 116, 0.2); margin: 10px; }
-        .button:hover { transform: translateY(-2px); box-shadow: 0 15px 40px rgba(212, 165, 116, 0.3); }
-        .button.danger { background: linear-gradient(135deg, #9d1f44 0%, #7a1635 100%); }
-        .status { margin-top: 30px; padding: 20px; background: rgba(212, 165, 116, 0.1); border-radius: 8px; color: #d4a574; display: none; border-left: 3px solid #d4a574; }
-        .status.show { display: block; animation: slideIn 0.3s ease; }
-        @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>📧 PLATREMO Email Agent</h1>
-            <div class="nav">
-                <a href="/">Intro</a>
-                <a href="/review">Review Queue</a>
-                <a href="https://github.com/AdrianPovestca/companymind-ai" target="_blank">GitHub</a>
-            </div>
-        </div>
-
-        <div class="stats">
-            <div class="stat-card">
-                <div class="stat-number" id="pending">0</div>
-                <div class="stat-label">Pending Review</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="auto">0</div>
-                <div class="stat-label">Auto-Replied</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="total">0</div>
-                <div class="stat-label">Total Processed</div>
-            </div>
-        </div>
-
-        <div class="action-section">
-            <button class="button" id="btn" onclick="process()">▶ Start Processing</button>
-            <button class="button danger" onclick="alert('Scheduler runs 24/7 on Railway')">⏹ Stop</button>
-            <a href="/review" class="button">👁 Review Queue</a>
-            <div class="status" id="status"></div>
-        </div>
-    </div>
-
-    <script>
-        function process() {
-            const btn = document.getElementById('btn');
-            const status = document.getElementById('status');
-            btn.disabled = true;
-            btn.textContent = '⏳ Processing...';
-            status.className = 'status show';
-            status.textContent = 'Processing emails...';
-            fetch('/api/process-emails', {method: 'POST'})
-                .then(r => r.json())
-                .then(d => {
-                    status.textContent = '✅ Done!';
-                    setTimeout(() => {
-                        btn.textContent = '▶ Start Processing';
-                        btn.disabled = false;
-                        loadStats();
-                        setTimeout(() => status.className = 'status', 2000);
-                    }, 1500);
-                })
-                .catch(e => {
-                    status.textContent = '❌ Error';
-                    btn.disabled = false;
-                    btn.textContent = '▶ Start Processing';
-                });
-        }
-        function loadStats() {
-            fetch('/api/stats').then(r => r.json()).then(d => {
-                document.getElementById('pending').textContent = d.pending;
-                document.getElementById('auto').textContent = d.auto_replied;
-                document.getElementById('total').textContent = d.total;
-            });
-        }
-        loadStats();
-        setInterval(loadStats, 5000);
-    </script>
-</body>
-</html>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PLATREMO · Email Agent</title>
+<style>
+:root{--bg:#0b1220;--card:#121d31;--line:#243452;--text:#e8eef9;--muted:#91a2bd;--blue:#5b8cff;--green:#23c483;--red:#ff647c;--amber:#ffbd59}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top right,#18294a,#0b1220 55%);color:var(--text);font:15px Inter,system-ui,sans-serif}.wrap{max-width:1180px;margin:auto;padding:34px 22px}.top{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:34px}h1{margin:0;font-size:31px}h1 span{color:var(--blue)}.nav a{color:var(--muted);text-decoration:none;margin-left:18px}.statusbar{display:flex;align-items:center;gap:12px;background:rgba(18,29,49,.86);border:1px solid var(--line);border-radius:16px;padding:17px 20px;margin-bottom:24px}.dot{width:11px;height:11px;border-radius:50%;background:var(--red);box-shadow:0 0 0 5px #ff647c22}.dot.on{background:var(--green);box-shadow:0 0 0 5px #23c48322}.statusbar strong{font-size:17px}.statusbar small{color:var(--muted);margin-left:auto}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}.card{background:linear-gradient(145deg,#16243c,#101a2c);border:1px solid var(--line);border-radius:16px;padding:22px}.num{font-size:36px;font-weight:750;margin:10px 0 4px}.label{color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-size:11px}.actions{display:flex;gap:12px;flex-wrap:wrap;margin:25px 0}.btn{border:0;border-radius:11px;padding:13px 20px;color:white;font-weight:700;cursor:pointer;background:var(--blue);box-shadow:0 8px 20px #5b8cff2a}.btn.stop{background:#7b2840}.btn:disabled{opacity:.5;cursor:not-allowed}.notice{min-height:24px;color:var(--muted);margin:8px 0}.panel{margin-top:24px}.panel h2{font-size:18px}.email{padding:15px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:20px}.email b{display:block}.email span{color:var(--muted);font-size:13px}.urgent{color:var(--amber)}@media(max-width:700px){.top{align-items:flex-start;flex-direction:column}.nav a{margin:0 14px 0 0}.stats{grid-template-columns:repeat(2,1fr)}.email{display:block}}
+</style></head>
+<body><main class="wrap"><header class="top"><h1>📧 <span>PLATREMO</span> Email Agent</h1><nav class="nav"><a href="/intro">Intro</a><a href="/review">Review Queue</a><a href="https://github.com/AdrianPovestca/companymind-ai">GitHub</a></nav></header>
+<section class="statusbar"><i class="dot" id="dot"></i><strong id="agent-status">Oprit</strong><small id="last-run"></small></section>
+<section class="stats"><div class="card"><div class="label">În așteptare</div><div class="num" id="pending">0</div></div><div class="card"><div class="label">Auto-reply trimise</div><div class="num" id="auto">0</div></div><div class="card"><div class="label">Emailuri procesate</div><div class="num" id="total">0</div></div><div class="card"><div class="label urgent">Urgente</div><div class="num urgent" id="urgent">0</div></div></section>
+<div class="actions"><button class="btn" id="start" onclick="startAgent()">▶ Pornește agentul</button><button class="btn stop" id="stop" onclick="stopAgent()">■ Oprește agentul</button><a class="btn" href="/review">👁 Vezi coada</a></div><div class="notice" id="notice">Agentul este oprit. Promoțiile sunt ignorate automat.</div>
+<section class="panel"><h2>📥 Emailuri care necesită atenție</h2><div id="emails"><div class="card">Se încarcă…</div></div></section></main>
+<script>
+const $=id=>document.getElementById(id);async function api(url,opt){const r=await fetch(url,opt);return r.json()}
+async function refresh(){try{const [s,a,e]=await Promise.all([api('/api/agent/status'),api('/api/stats'),api('/api/pending-emails')]);$('agent-status').textContent=s.status;$('dot').classList.toggle('on',s.running);$('last-run').textContent=s.last_run?'Ultima rundă: '+s.last_run:'';$('start').disabled=s.running;$('stop').disabled=!s.running;$('pending').textContent=a.pending;$('auto').textContent=a.auto_replied;$('total').textContent=a.total;$('urgent').textContent=a.urgent;if(s.last_error)$('notice').textContent='⚠️ '+s.last_error;$('emails').innerHTML=e.length?e.map(x=>`<div class="email"><div><b>${escapeHtml(x.subject||'(fără subiect)')}</b><span>${escapeHtml(x.sender||'')}</span></div><span class="urgent">Necesită atenție</span></div>`).join(''):'<div class="card">✅ Nicio solicitare urgentă sau de review.</div>'}catch(err){$('notice').textContent='Dashboard indisponibil: '+err}}
+function escapeHtml(v){return String(v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}async function startAgent(){ $('notice').textContent='Pornesc agentul…';await api('/api/agent/start',{method:'POST'});refresh()}async function stopAgent(){ $('notice').textContent='Oprire în curs…';await api('/api/agent/stop',{method:'POST'});refresh()}refresh();setInterval(refresh,4000);
+</script></body></html>
