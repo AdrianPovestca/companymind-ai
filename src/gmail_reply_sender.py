@@ -44,12 +44,19 @@ def send_replies():
         print("No automatic replies pending.")
         return 0
 
-    credentials_path = os.environ.get("GMAIL_CREDENTIALS_PATH", "gmail_oauth_credentials.json")
+    # ✅ FIX: Pe Render, secret files sunt în /etc/secrets/
+    credentials_path = "/etc/secrets/gmail_oauth_credentials.json"
+    
+    # Check dacă fișierul există
+    if not os.path.exists(credentials_path):
+        print(f"ERROR: Credentials file not found at {credentials_path}", file=sys.stderr)
+        return 1
+    
     try:
         gmail = GmailEmailConnector(credentials_path=credentials_path)
     except Exception as exc:
         print(f"Gmail reply sender skipped: {exc}", file=sys.stderr)
-        return 0
+        return 1
 
     sent_count = 0
     for email in emails_to_reply:
