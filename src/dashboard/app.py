@@ -158,7 +158,7 @@ def intro(): return render_template("intro.html")
 @app.route("/review")
 def review_dashboard(): return render_template("review.html")
 @app.route("/history")
-def history_page(): return render_template("index.html")
+def history_page(): return render_template("history.html")
 
 
 @app.route("/api/agent/status")
