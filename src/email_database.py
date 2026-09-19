@@ -47,13 +47,15 @@ def init_email_db() -> None:
             human_review_note TEXT,
             reviewed_at TEXT,
             message_type TEXT DEFAULT 'email',
-            urgent_notified_at TEXT
+            urgent_notified_at TEXT,
+            email_category TEXT DEFAULT 'normal'
         )
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_email_thread_id ON emails(thread_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_email_status ON emails(status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_email_message_type ON emails(message_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_email_category ON emails(email_category)")
 
     required_columns = {
         "decision_action": "TEXT",
@@ -66,6 +68,7 @@ def init_email_db() -> None:
         "reviewed_at": "TEXT",
         "message_type": "TEXT DEFAULT 'email'",
         "urgent_notified_at": "TEXT",
+        "email_category": "TEXT DEFAULT 'normal'",
     }
     for column_name, column_definition in required_columns.items():
         _ensure_column(conn, column_name, column_definition)
