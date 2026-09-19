@@ -7,8 +7,11 @@ from pathlib import Path
 
 from flask import Flask, jsonify, render_template
 from flask_cors import CORS
+from apscheduler.schedulers.background import BackgroundScheduler
 
 from src.email_database import get_connection, init_email_db
+from src.gmail_reply_sender import send_replies
+from src.notifications import check_and_notify
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 APP_ROOT = Path(__file__).resolve().parent
@@ -28,6 +31,42 @@ _agent_stop = threading.Event()
 _agent_thread = None
 _agent_processes = []
 _agent_state = {"running": False, "status": "Stopped", "last_error": None, "last_run": None}
+
+# APScheduler initialization
+scheduler = None
+
+def init_scheduler():
+    """Initialize and start APScheduler for background jobs."""
+    global scheduler
+    if scheduler is not None:
+        return
+    
+    scheduler = BackgroundScheduler()
+    
+    # Job 1: Send email replies every 2 minutes
+    scheduler.add_job(
+        func=send_replies,
+        trigger="interval",
+        minutes=2,
+        id="email_reply_job",
+        name="Send email replies",
+        replace_existing=True,
+        max_instances=1
+    )
+    
+    # Job 2: Check and send Telegram notifications every 2 minutes
+    scheduler.add_job(
+        func=check_and_notify,
+        trigger="interval",
+        minutes=2,
+        id="notification_job",
+        name="Send Telegram notifications",
+        replace_existing=True,
+        max_instances=1
+    )
+    
+    scheduler.start()
+    app.logger.info("✅ APScheduler started - background jobs running every 2 minutes")
 
 
 def _auth_error():
@@ -177,6 +216,11 @@ def reject(email_id):
 
 @app.route("/api/process-emails", methods=["POST"])
 def process_emails(): return start_agent()
+
+
+# Initialize scheduler when app starts
+with app.app_context():
+    init_scheduler()
 
 
 if __name__ == "__main__":
