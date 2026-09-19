@@ -19,6 +19,7 @@ class EmailAnalysis:
     language: str
     requires_human: bool
     reason: str
+    category: str = "normal"
 
 
 URGENT_WORDS = {
@@ -37,6 +38,35 @@ HUMAN_REQUIRED_WORDS = {
     "fraud",
     "stolen",
     "account hacked",
+}
+
+SPAM_INDICATORS = {
+    "viagra",
+    "casino",
+    "lottery",
+    "click here",
+    "unsubscribe",
+    "limited time",
+    "act now",
+    "free money",
+    "nigerian",
+    "prince",
+    "bitcoin",
+    "crypto",
+    "get rich",
+}
+
+MARKETING_KEYWORDS = {
+    "newsletter",
+    "subscribe",
+    "promotional",
+    "sale",
+    "discount",
+    "offer",
+    "deal",
+    "promotion",
+    "special offer",
+    "limited offer",
 }
 
 
@@ -135,6 +165,34 @@ def detect_intent(subject: str, body: str) -> str:
     return "general"
 
 
+def detect_category(subject: str, body: str, intent: str, urgency: str) -> str:
+    """Classify email into category: spam, marketing, person, urgent, promotion, normal."""
+    
+    text = f"{subject} {body}".lower()
+    
+    # Check spam first (highest priority)
+    if any(word in text for word in SPAM_INDICATORS):
+        return "spam"
+    
+    # Check marketing/newsletter
+    if any(word in text for word in MARKETING_KEYWORDS):
+        return "marketing"
+    
+    # Check if from person (human interaction)
+    if intent in ("complaint", "refund", "customer_support", "billing"):
+        return "person"
+    
+    # Check if urgent (explicit urgency markers)
+    if urgency == "high":
+        return "urgent"
+    
+    # Check for promotional content
+    if intent == "sales":
+        return "promotion"
+    
+    return "normal"
+
+
 def analyze_email(email: Email) -> EmailAnalysis:
     """Analyze an incoming email."""
 
@@ -176,10 +234,13 @@ def analyze_email(email: Email) -> EmailAnalysis:
             "The email can initially be handled automatically."
         )
 
+    category = detect_category(email.subject, email.body, intent, urgency)
+
     return EmailAnalysis(
         intent=intent,
         urgency=urgency,
         language=language,
         requires_human=requires_human,
         reason=reason,
+        category=category,
     )
