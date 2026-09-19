@@ -5,7 +5,7 @@ import threading
 import time
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -159,6 +159,8 @@ def intro(): return render_template("intro.html")
 def review_dashboard(): return render_template("review.html")
 @app.route("/history")
 def history_page(): return render_template("history.html")
+@app.route("/campaigns")
+def campaigns_page(): return render_template("campaigns.html")
 
 
 @app.route("/api/agent/status")
@@ -297,6 +299,285 @@ def get_history_stats():
         return jsonify(stats)
     except Exception as exc:
         app.logger.exception("History stats failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+# ===== CAMPAIGN ENDPOINTS =====
+
+@app.route("/api/campaigns", methods=["GET"])
+def get_campaigns_list():
+    """Get all campaigns."""
+    try:
+        from src.campaign_database import get_campaigns
+        campaigns = get_campaigns(limit=100)
+        return jsonify(campaigns)
+    except Exception as exc:
+        app.logger.exception("Get campaigns failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/campaigns/<campaign_id>", methods=["GET"])
+def get_campaign_detail(campaign_id):
+    """Get campaign details with stats."""
+    try:
+        from src.campaign_database import get_campaign, get_campaign_stats
+        campaign = get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({"error": "Campaign not found"}), 404
+        
+        stats = get_campaign_stats(campaign_id)
+        return jsonify({**dict(campaign), **stats})
+    except Exception as exc:
+        app.logger.exception("Get campaign detail failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/campaigns", methods=["POST"])
+def create_campaign():
+    """Create new campaign."""
+    try:
+        from src.campaign_database import create_campaign, add_campaign_recipient
+        import json
+        import uuid
+        
+        data = request.get_json()
+        
+        # Validate required fields
+        if not all(k in data for k in ['name', 'subject', 'body', 'sender_email', 'recipients', 'speed_setting']):
+            return jsonify({"error": "Missing required fields"}), 400
+        
+        campaign_id = str(uuid.uuid4())
+        recipients = data.get('recipients', [])
+        scheduled_at = data.get('scheduled_at')
+        
+        # Create campaign
+        create_campaign(
+            campaign_id=campaign_id,
+            name=data['name'],
+            subject=data['subject'],
+            body=data['body'],
+            sender_email=data['sender_email'],
+            recipient_count=len(recipients),
+            speed_setting=data.get('speed_setting', 'normal'),
+            scheduled_at=scheduled_at
+        )
+        
+        # Add recipients
+        for recipient in recipients:
+            recipient_id = str(uuid.uuid4())
+            add_campaign_recipient(
+                recipient_id=recipient_id,
+                campaign_id=campaign_id,
+                email=recipient.get('email'),
+                name=recipient.get('name'),
+                personalization_data=json.dumps(recipient.get('data', {})) if recipient.get('data') else None
+            )
+        
+        return jsonify({"ok": True, "campaign_id": campaign_id}), 201
+    except Exception as exc:
+        app.logger.exception("Create campaign failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/campaigns/<campaign_id>/send", methods=["POST"])
+def send_campaign(campaign_id):
+    """Send campaign immediately."""
+    try:
+        from src.campaign_database import get_campaign, update_campaign_status
+        from src.campaign_sender import CampaignSender
+        
+        campaign = get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({"error": "Campaign not found"}), 404
+        
+        if campaign['status'] not in ['draft', 'scheduled']:
+            return jsonify({"error": f"Campaign status is {campaign['status']}, cannot send"}), 400
+        
+        # Check Gmail credentials
+        if not GMAIL_CREDENTIALS_PATH.is_file():
+            return jsonify({"error": "Gmail credentials not configured"}), 400
+        
+        # Send campaign (in background thread to avoid timeout)
+        sender = CampaignSender(str(GMAIL_CREDENTIALS_PATH))
+        
+        def send_background():
+            try:
+                stats = sender.process_campaign(campaign_id)
+                app.logger.info(f"Campaign {campaign_id} sent: {stats}")
+            except Exception as e:
+                app.logger.exception(f"Campaign send failed: {e}")
+                update_campaign_status(campaign_id, 'failed')
+        
+        thread = threading.Thread(target=send_background, daemon=True)
+        thread.start()
+        
+        return jsonify({"ok": True, "status": "Campaign sending started", "campaign_id": campaign_id})
+    except Exception as exc:
+        app.logger.exception("Send campaign failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/campaigns/<campaign_id>/schedule", methods=["POST"])
+def schedule_campaign(campaign_id):
+    """Schedule campaign for later."""
+    try:
+        from src.campaign_database import get_campaign, update_campaign_status
+        
+        data = request.get_json()
+        scheduled_at = data.get('scheduled_at')
+        
+        if not scheduled_at:
+            return jsonify({"error": "scheduled_at is required"}), 400
+        
+        campaign = get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({"error": "Campaign not found"}), 404
+        
+        # TODO: Implement scheduler to send at scheduled_at time
+        # For now, just update status to scheduled
+        update_campaign_status(campaign_id, 'scheduled')
+        
+        return jsonify({"ok": True, "status": "Campaign scheduled", "scheduled_at": scheduled_at})
+    except Exception as exc:
+        app.logger.exception("Schedule campaign failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/campaigns/<campaign_id>/preview", methods=["GET"])
+def preview_campaign(campaign_id):
+    """Get campaign preview."""
+    try:
+        from src.campaign_database import get_campaign, get_campaign_recipients
+        from src.campaign_sender import TemplateParser
+        
+        campaign = get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({"error": "Campaign not found"}), 404
+        
+        recipients = get_campaign_recipients(campaign_id, status='pending')
+        
+        # Get first recipient for preview
+        preview_recipient = recipients[0] if recipients else {'email': 'example@test.com', 'name': 'John'}
+        
+        personal_data = {
+            'email': preview_recipient.get('email', ''),
+            'name': preview_recipient.get('name', 'there'),
+        }
+        
+        # Personalize preview
+        subject_preview = TemplateParser.parse(campaign['subject'], personal_data)
+        body_preview = TemplateParser.parse(campaign['body'], personal_data)
+        
+        return jsonify({
+            "campaign_id": campaign_id,
+            "name": campaign['name'],
+            "subject": subject_preview,
+            "body": body_preview,
+            "sender_email": campaign['sender_email'],
+            "recipient_count": campaign['recipient_count'],
+            "speed_setting": campaign['speed_setting']
+        })
+    except Exception as exc:
+        app.logger.exception("Preview campaign failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/campaigns/<campaign_id>/stats", methods=["GET"])
+def campaign_stats(campaign_id):
+    """Get detailed campaign statistics."""
+    try:
+        from src.campaign_database import get_campaign, get_campaign_stats, get_campaign_recipients
+        
+        campaign = get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({"error": "Campaign not found"}), 404
+        
+        stats = get_campaign_stats(campaign_id)
+        
+        # Get failed recipients with error messages
+        failed_recipients = get_campaign_recipients(campaign_id, status='failed')
+        
+        return jsonify({
+            **stats,
+            "status": campaign['status'],
+            "started_at": campaign['started_at'],
+            "completed_at": campaign['completed_at'],
+            "failed_details": [
+                {"email": r['email'], "error": r['error_message']}
+                for r in failed_recipients[:20]  # Limit to 20
+            ]
+        })
+    except Exception as exc:
+        app.logger.exception("Campaign stats failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/campaigns/<campaign_id>/delete", methods=["DELETE"])
+def delete_campaign(campaign_id):
+    """Delete campaign (only if draft)."""
+    try:
+        from src.campaign_database import get_campaign, update_campaign_status
+        
+        campaign = get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({"error": "Campaign not found"}), 404
+        
+        if campaign['status'] != 'draft':
+            return jsonify({"error": f"Cannot delete campaign with status '{campaign['status']}'"}), 400
+        
+        # Mark as deleted
+        update_campaign_status(campaign_id, 'deleted')
+        
+        return jsonify({"ok": True, "message": "Campaign deleted"})
+    except Exception as exc:
+        app.logger.exception("Delete campaign failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/campaigns/<campaign_id>/recipients/import", methods=["POST"])
+def import_recipients(campaign_id):
+    """Import recipients from CSV or paste list."""
+    try:
+        from src.campaign_database import get_campaign, add_campaign_recipient
+        import csv
+        import io
+        import uuid
+        
+        data = request.get_json()
+        
+        campaign = get_campaign(campaign_id)
+        if not campaign:
+            return jsonify({"error": "Campaign not found"}), 404
+        
+        # Handle CSV data
+        csv_text = data.get('csv_text')
+        if csv_text:
+            reader = csv.DictReader(io.StringIO(csv_text))
+            added = 0
+            errors = []
+            
+            for row in reader:
+                email = row.get('email', '').strip()
+                name = row.get('name', '').strip()
+                
+                if not email:
+                    errors.append("Empty email in row")
+                    continue
+                
+                recipient_id = str(uuid.uuid4())
+                add_campaign_recipient(
+                    recipient_id=recipient_id,
+                    campaign_id=campaign_id,
+                    email=email,
+                    name=name
+                )
+                added += 1
+            
+            return jsonify({"ok": True, "added": added, "errors": errors})
+        
+        return jsonify({"error": "No CSV data provided"}), 400
+    except Exception as exc:
+        app.logger.exception("Import recipients failed")
         return jsonify({"error": str(exc)}), 500
 
 
