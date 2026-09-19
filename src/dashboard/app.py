@@ -223,5 +223,22 @@ with app.app_context():
     init_scheduler()
 
 
+@app.route("/api/trigger-jobs", methods=["GET", "POST"])
+def trigger_jobs():
+    """Trigger background jobs - called by external cron."""
+    try:
+        replies_sent = send_replies()
+        notifications_sent = check_and_notify()
+        return jsonify({
+            "ok": True,
+            "replies_sent": replies_sent,
+            "notifications_sent": notifications_sent,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        })
+    except Exception as exc:
+        app.logger.error(f"Trigger jobs failed: {exc}")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
