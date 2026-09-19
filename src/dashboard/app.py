@@ -66,7 +66,7 @@ def init_scheduler():
     )
     
     scheduler.start()
-    app.logger.info("✅ APScheduler started - background jobs running every 2 minutes")
+    app.logger.info("APScheduler started - background jobs running every 2 minutes")
 
 
 def _auth_error():
@@ -133,7 +133,7 @@ def _start_agent():
         if _agent_thread and _agent_thread.is_alive():
             return False
         _agent_stop.clear()
-        _agent_state.update({"running": True, "status": "Starting agent…", "last_error": None, "last_output": None})
+        _agent_state.update({"running": True, "status": "Starting agent...", "last_error": None, "last_output": None})
         _agent_thread = threading.Thread(target=_pipeline, daemon=True, name="email-agent")
         _agent_thread.start()
     return True
@@ -157,6 +157,8 @@ def index(): return render_template("index.html")
 def intro(): return render_template("intro.html")
 @app.route("/review")
 def review_dashboard(): return render_template("review.html")
+@app.route("/history")
+def history_page(): return render_template("index.html")
 
 
 @app.route("/api/agent/status")
@@ -218,11 +220,6 @@ def reject(email_id):
 def process_emails(): return start_agent()
 
 
-# Initialize scheduler when app starts
-with app.app_context():
-    init_scheduler()
-
-
 @app.route("/api/trigger-jobs", methods=["GET", "POST"])
 def trigger_jobs():
     """Trigger background jobs - called by external cron."""
@@ -238,6 +235,74 @@ def trigger_jobs():
     except Exception as exc:
         app.logger.error(f"Trigger jobs failed: {exc}")
         return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/email-history")
+def get_email_history():
+    """Get all emails with category and stats."""
+    try:
+        init_email_db()
+        conn = get_connection()
+        rows = conn.execute("""
+            SELECT message_id, sender, subject, email_category, created_at, decision_urgency
+            FROM emails
+            ORDER BY created_at DESC
+            LIMIT 500
+        """).fetchall()
+        conn.close()
+        return jsonify([dict(row) for row in rows])
+    except Exception as exc:
+        app.logger.exception("Email history failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/spam-emails")
+def get_spam_emails():
+    """Get emails detected as spam - review if legitimate."""
+    try:
+        init_email_db()
+        conn = get_connection()
+        rows = conn.execute("""
+            SELECT message_id, sender, subject, created_at
+            FROM emails
+            WHERE email_category = 'spam'
+            ORDER BY created_at DESC
+            LIMIT 200
+        """).fetchall()
+        conn.close()
+        return jsonify([dict(row) for row in rows])
+    except Exception as exc:
+        app.logger.exception("Spam emails failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/history-stats")
+def get_history_stats():
+    """Get statistics on email categories."""
+    try:
+        init_email_db()
+        conn = get_connection()
+        stats = {}
+        for category in ['normal', 'person', 'marketing', 'urgent', 'spam', 'promotion']:
+            count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM emails WHERE email_category = ?",
+                (category,)
+            ).fetchone()['cnt']
+            stats[category] = count
+        
+        total = conn.execute("SELECT COUNT(*) as cnt FROM emails").fetchone()['cnt']
+        stats['total'] = total
+        
+        conn.close()
+        return jsonify(stats)
+    except Exception as exc:
+        app.logger.exception("History stats failed")
+        return jsonify({"error": str(exc)}), 500
+
+
+# Initialize scheduler when app starts
+with app.app_context():
+    init_scheduler()
 
 
 if __name__ == "__main__":
