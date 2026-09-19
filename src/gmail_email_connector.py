@@ -1,315 +1,205 @@
-import base64
-import logging
+"""Campaign sending engine with batching, throttling, and retry logic."""
+import time
+import uuid
+from typing import List, Dict, Optional
+from datetime import datetime
+import re
 import os
+import base64
 from email.mime.text import MIMEText
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import List, Optional
-from urllib.parse import parse_qs, urlparse
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-
-from src.email_connector import EmailConnector
-from src.email_models import Email
-
-logger = logging.getLogger(__name__)
-
-SCOPES = [
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://mail.google.com/",
-]
-
-REDIRECT_URI = (
-    "https://musical-space-eureka-qv7wj96wx7qqhxrgx-40271.app.github.dev/"
+from src.gmail_email_connector import GmailEmailConnector
+from src.campaign_database import (
+    get_campaign_recipients, update_recipient_status, 
+    add_campaign_log, update_campaign_status, get_campaign
 )
-CALLBACK_PORT = 40271
 
 
-class GmailEmailConnector(EmailConnector):
-    def __init__(self, credentials_path: str, **kwargs):
-        self.credentials_path = os.environ.get(
-            "GMAIL_CREDENTIALS_PATH",
-            str(credentials_path),
-        )
-        self.token_path = os.environ.get(
-            "GMAIL_TOKEN_PATH",
-            "gmail_token.json",
-        )
-        self.service = None
-        self.user_id = "me"
+class TemplateParser:
+    """Parse and personalize email templates."""
+    
+    PLACEHOLDER_PATTERN = r'\[([A-Z_]+)\]'
+    
+    @staticmethod
+    def parse(template: str, data: Dict[str, str]) -> str:
+        """Replace placeholders with values from data dict."""
+        result = template
+        for placeholder in re.findall(TemplateParser.PLACEHOLDER_PATTERN, template):
+            key = placeholder.lower()
+            value = data.get(key, f"[{placeholder}]")
+            result = result.replace(f"[{placeholder}]", str(value))
+        return result
+    
+    @staticmethod
+    def get_placeholders(template: str) -> List[str]:
+        """Extract all placeholders from template."""
+        return re.findall(TemplateParser.PLACEHOLDER_PATTERN, template)
+    
+    @staticmethod
+    def validate_email(email: str) -> bool:
+        """Basic email validation."""
+        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        return re.match(pattern, email) is not None
 
-        logger.info("Gmail connector initialized")
-        self._authenticate()
 
-    def _authenticate(self) -> None:
-        """Authenticate with Gmail using the OAuth flow."""
-        creds = None
-
-        if os.path.exists(self.token_path):
-            try:
-                creds = Credentials.from_authorized_user_file(
-                    self.token_path,
-                    SCOPES,
-                )
-                logger.info("Loaded existing Gmail token")
-            except Exception as error:
-                logger.warning(f"Could not load Gmail token: {error}")
-                creds = None
-
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-                logger.info("Gmail token refreshed")
+class CampaignSender:
+    """Handles campaign sending with throttling and retry."""
+    
+    # Speed settings: emails per second
+    SPEED_SETTINGS = {
+        'slow': 0.5,      # 1 email per 2 seconds
+        'normal': 1.0,    # 1 email per second
+        'fast': 2.0,      # 2 emails per second
+    }
+    
+    def __init__(self, credentials_path: str):
+        """Initialize campaign sender."""
+        self.gmail = GmailEmailConnector(credentials_path=credentials_path)
+        self.credentials_path = credentials_path
+    
+    def get_delay_for_speed(self, speed_setting: str) -> float:
+        """Get delay between emails based on speed setting."""
+        return 1.0 / self.SPEED_SETTINGS.get(speed_setting, 1.0)
+    
+    def validate_recipients(self, recipients: List[Dict]) -> tuple:
+        """Validate recipient emails, return (valid, invalid)."""
+        valid = []
+        invalid = []
+        
+        for recipient in recipients:
+            email = recipient.get('email', '').strip()
+            if not email:
+                invalid.append({**recipient, 'error': 'Empty email'})
+            elif not TemplateParser.validate_email(email):
+                invalid.append({**recipient, 'error': 'Invalid email format'})
             else:
-                flow = Flow.from_client_secrets_file(
-                    self.credentials_path,
-                    scopes=SCOPES,
-                )
-                flow.redirect_uri = REDIRECT_URI
-
-                authorization_url, state = flow.authorization_url(
-                    access_type="offline",
-                    include_granted_scopes="true",
-                    prompt="consent",
-                )
-
-                callback_data = {}
-
-                class OAuthHandler(BaseHTTPRequestHandler):
-                    def do_GET(self):
-                        parsed = urlparse(self.path)
-                        params = parse_qs(parsed.query)
-                        callback_data["code"] = params.get("code", [None])[0]
-                        callback_data["state"] = params.get("state", [None])[0]
-                        callback_data["error"] = params.get("error", [None])[0]
-
-                        self.send_response(200)
-                        self.send_header("Content-Type", "text/html")
-                        self.end_headers()
-                        self.wfile.write(
-                            b"<html><body><h2>Gmail authorization received.</h2>"
-                            b"<p>You can return to the terminal.</p></body></html>"
-                        )
-
-                    def log_message(self, format, *args):
-                        return
-
-                logger.info("Starting Gmail OAuth browser flow")
-                print("\n" + "=" * 70)
-                print("GMAIL AUTHORIZATION")
-                print("=" * 70)
-                print("\nOpen this URL in your browser:\n")
-                print(authorization_url)
-                print("\n" + "=" * 70)
-                print()
-
-                server = HTTPServer(("0.0.0.0", CALLBACK_PORT), OAuthHandler)
-                while "code" not in callback_data and "error" not in callback_data:
-                    server.handle_request()
-                server.server_close()
-
-                if callback_data.get("error"):
-                    raise RuntimeError(f"Google OAuth returned an error: {callback_data['error']}")
-
-                authorization_code = callback_data.get("code")
-                if not authorization_code:
-                    raise RuntimeError("Google OAuth did not return an authorization code.")
-
-                flow.fetch_token(code=authorization_code)
-                creds = flow.credentials
-                logger.info("Gmail authorization successful")
-
-            with open(self.token_path, "w") as token_file:
-                token_file.write(creds.to_json())
-
-            logger.info(f"Gmail token saved to {self.token_path}")
-
-        self.service = build(
-            "gmail",
-            "v1",
-            credentials=creds,
-        )
-
-        logger.info("Gmail service ready")
-
-    def fetch_unread_emails(self, limit: int = 10) -> List[Email]:
+                valid.append(recipient)
+        
+        return valid, invalid
+    
+    def send_email(self, to_email: str, subject: str, body: str, 
+                   sender_email: str) -> tuple:
+        """Send single email via Gmail using send_reply method."""
         try:
-            results = (
-                self.service.users()
-                .messages()
-                .list(
-                    userId=self.user_id,
-                    q="is:unread",
-                    maxResults=limit,
-                )
-                .execute()
-            )
-
-            messages = results.get("messages", [])
-            logger.info(f"Found {len(messages)} unread emails")
-
-            emails = []
-            for message in messages:
-                email_obj = self._parse_gmail_message(message["id"])
-                if email_obj:
-                    emails.append(email_obj)
-            return emails
-        except HttpError as error:
-            logger.error(f"Gmail API error while fetching emails: {error}")
-            return []
-
-    def _parse_gmail_message(self, message_id: str) -> Optional[Email]:
-        try:
-            message = (
-                self.service.users()
-                .messages()
-                .get(
-                    userId=self.user_id,
-                    id=message_id,
-                    format="full",
-                )
-                .execute()
-            )
-
-            headers = message["payload"].get("headers", [])
-            subject = next(
-                (header["value"] for header in headers if header["name"].lower() == "subject"),
-                "",
-            )
-            sender = next(
-                (header["value"] for header in headers if header["name"].lower() == "from"),
-                "",
-            )
-            recipient = next(
-                (header["value"] for header in headers if header["name"].lower() == "to"),
-                "",
-            )
-            date_str = next(
-                (header["value"] for header in headers if header["name"].lower() == "date"),
-                "",
-            )
-
-            body = self._extract_body(message["payload"])
-            email_obj = Email(
-                message_id=message_id,
-                thread_id=message.get("threadId", ""),
-                sender=sender,
-                recipient=recipient,
-                subject=subject,
-                body=body,
-                timestamp=date_str,
-                attachments=[],
-            )
-            logger.info(f"Parsed email: {subject[:50]}")
-            return email_obj
-        except HttpError as error:
-            logger.error(f"Gmail API error while parsing message: {error}")
-            return None
-        except Exception as error:
-            logger.error(f"Error parsing Gmail message: {error}")
-            return None
-
-    def _extract_body(self, payload) -> str:
-        try:
-            if "parts" in payload:
-                for part in payload["parts"]:
-                    mime_type = part.get("mimeType", "")
-                    if mime_type == "text/plain":
-                        data = part.get("body", {}).get("data", "")
-                        if data:
-                            return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-                    if mime_type.startswith("multipart/"):
-                        nested_body = self._extract_body(part)
-                        if nested_body:
-                            return nested_body
+            # Create MIME message
+            msg = MIMEText(body)
+            msg['to'] = to_email
+            msg['from'] = sender_email
+            msg['subject'] = subject
+            
+            # Encode message
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            
+            # Send via Gmail API
+            message = self.gmail.service.users().messages().send(
+                userId="me",
+                body={'raw': raw}
+            ).execute()
+            
+            message_id = message.get('id')
+            return True, message_id
+        except Exception as e:
+            return False, str(e)
+    
+    def process_campaign(self, campaign_id: str, batch_size: int = 50, 
+                        max_retries: int = 3) -> Dict:
+        """
+        Process campaign sending with batching and retry.
+        
+        Returns stats dict with sent/failed counts.
+        """
+        campaign = get_campaign(campaign_id)
+        if not campaign:
+            return {'error': 'Campaign not found'}
+        
+        if campaign['status'] not in ['draft', 'scheduled']:
+            return {'error': f"Campaign status is {campaign['status']}, cannot send"}
+        
+        # Update status to started
+        update_campaign_status(campaign_id, 'started')
+        add_campaign_log(str(uuid.uuid4()), campaign_id, 'start', 'Campaign sending started')
+        
+        # Get pending recipients
+        recipients = get_campaign_recipients(campaign_id, status='pending')
+        if not recipients:
+            update_campaign_status(campaign_id, 'completed')
+            return {'error': 'No pending recipients'}
+        
+        # Validate recipients
+        valid_recipients, invalid_recipients = self.validate_recipients(recipients)
+        
+        # Mark invalid as failed
+        for invalid in invalid_recipients:
+            recipient_id = invalid.get('id')
+            update_recipient_status(recipient_id, 'failed', invalid.get('error'))
+            add_campaign_log(str(uuid.uuid4()), campaign_id, 'validation_failed',
+                           f"Invalid email: {invalid.get('email')}")
+        
+        # Get delay between sends
+        delay = self.get_delay_for_speed(campaign['speed_setting'])
+        
+        # Parse template
+        subject_template = campaign['subject']
+        body_template = campaign['body']
+        sender_email = campaign['sender_email']
+        
+        stats = {
+            'sent': 0,
+            'failed': 0,
+            'skipped': len(invalid_recipients),
+            'total': len(recipients),
+            'failed_emails': []
+        }
+        
+        # Send in batches with throttling
+        for i, recipient in enumerate(valid_recipients):
+            recipient_id = recipient['id']
+            email = recipient['email']
+            
+            # Parse personalization data
+            personal_data = {
+                'email': email,
+                'name': recipient.get('name', ''),
+            }
+            
+            # If there's extra personalization data, parse it
+            if recipient.get('personalization_data'):
+                try:
+                    import json
+                    extra_data = json.loads(recipient['personalization_data'])
+                    personal_data.update(extra_data)
+                except:
+                    pass
+            
+            # Personalize subject and body
+            subject = TemplateParser.parse(subject_template, personal_data)
+            body = TemplateParser.parse(body_template, personal_data)
+            
+            # Send email
+            success, message_id = self.send_email(email, subject, body, sender_email)
+            
+            if success:
+                update_recipient_status(recipient_id, 'sent')
+                stats['sent'] += 1
+                add_campaign_log(str(uuid.uuid4()), campaign_id, 'sent',
+                               f"Email sent to {email} (message_id: {message_id})")
             else:
-                data = payload.get("body", {}).get("data", "")
-                if data:
-                    return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
-        except Exception as error:
-            logger.warning(f"Could not extract email body: {error}")
-        return ""
-
-    def mark_as_read(self, message_id: str) -> bool:
-        try:
-            self.service.users().messages().modify(
-                userId=self.user_id,
-                id=message_id,
-                body={"removeLabelIds": ["UNREAD"]},
-            ).execute()
-            logger.info(f"Marked email as read: {message_id[:20]}")
-            return True
-        except HttpError as error:
-            logger.error(f"Error marking email as read: {error}")
-            return False
-
-    def send_reply(self, message_id: str, reply_text: str) -> Optional[str]:
-        try:
-            original = self.service.users().messages().get(
-                userId=self.user_id,
-                id=message_id,
-                format="full",
-            ).execute()
-
-            thread_id = original.get("threadId", "")
-            headers = original["payload"].get("headers", [])
-
-            from_header = next(
-                (header["value"] for header in headers if header["name"].lower() == "from"),
-                "",
-            )
-            subject = next(
-                (header["value"] for header in headers if header["name"].lower() == "subject"),
-                "",
-            )
-
-            message = MIMEText(reply_text)
-            message["to"] = from_header
-            message["subject"] = subject if subject.lower().startswith("re:") else f"Re: {subject}"
-
-            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
-            sent = self.service.users().messages().send(
-                userId=self.user_id,
-                body={"raw": raw_message, "threadId": thread_id},
-            ).execute()
-
-            sent_id = sent.get("id")
-            logger.info(f"Sent Gmail reply: {sent_id}")
-            return sent_id
-        except HttpError as error:
-            logger.error(f"Error sending Gmail reply: {error}")
-            return None
-        except Exception as error:
-            logger.error(f"Unexpected error sending Gmail reply: {error}")
-            return None
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    print("Testing Gmail connector...\n")
-    try:
-        connector = GmailEmailConnector(credentials_path="gmail_oauth_credentials.json")
-        emails = connector.fetch_unread_emails(limit=3)
-        print(f"Found {len(emails)} unread emails\n")
-        from src.gmail_to_db import save_email_to_db
-        for email_obj in emails:
-            print(f"Subject: {email_obj.subject}")
-            print(f"From: {email_obj.sender}")
-            print(f"To: {email_obj.recipient}")
-            print(f"Thread: {email_obj.thread_id}")
-            print()
-            save_email_to_db({
-                "message_id": email_obj.message_id,
-                "thread_id": email_obj.thread_id,
-                "subject": email_obj.subject,
-                "sender": email_obj.sender,
-                "recipient": email_obj.recipient,
-                "body": email_obj.body[:500] if hasattr(email_obj, "body") else "",
-                "timestamp": email_obj.timestamp if hasattr(email_obj, "timestamp") else None,
-            })
-        print("GMAIL CONNECTOR WORKING")
-    except Exception as error:
-        print(f"Gmail connector error: {error}")
+                update_recipient_status(recipient_id, 'failed', message_id)
+                stats['failed'] += 1
+                stats['failed_emails'].append({
+                    'email': email,
+                    'error': message_id
+                })
+                add_campaign_log(str(uuid.uuid4()), campaign_id, 'send_failed',
+                               f"Failed to send to {email}: {message_id}")
+            
+            # Throttle to respect rate limits
+            if i < len(valid_recipients) - 1:  # Don't delay after last email
+                time.sleep(delay)
+        
+        # Mark campaign as completed
+        update_campaign_status(campaign_id, 'completed')
+        add_campaign_log(str(uuid.uuid4()), campaign_id, 'complete',
+                        f"Campaign completed: {stats['sent']} sent, {stats['failed']} failed")
+        
+        return stats
