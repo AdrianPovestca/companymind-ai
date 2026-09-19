@@ -14,7 +14,7 @@ async function loadPendingEmails() {
     const list = document.getElementById('email-list');
     
     if (emails.length === 0) {
-        list.innerHTML = '<p class="loading">No pending emails 🎉</p>';
+        list.innerHTML = '<p class="loading">No pending emails</p>';
         return;
     }
     
